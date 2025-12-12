@@ -15,6 +15,13 @@ set(LASZIP "${CMAKE_SOURCE_DIR}/external/laszip" CACHE STRING "LASzip source dir
 message(STATUS "Found LASzip library in ${LASZIP}")
 add_subdirectory(${LASZIP})
 
+####################
+# json
+####################
+
+set(JSON "${CMAKE_SOURCE_DIR}/external/json" CACHE STRING "JSON source directory")
+message(STATUS "Found JSON library in ${JSON}")
+
 set(HEADER_FILES  
 	./src/common/attribute_type.h
   ./src/common/attribute.h
@@ -65,6 +72,7 @@ target_include_directories(potree-converter-cpp PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   src
   "${LASZIP}/include"
+  "${JSON}/single_include"
 )
 
 target_link_libraries(potree-converter-cpp laszip3)
