@@ -7,6 +7,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
 
+####################
+# laszip
+####################
+
+set(LASZIP "${CMAKE_SOURCE_DIR}/external/laszip" CACHE STRING "LASzip source directory")
+message(STATUS "Found LASzip library in ${LASZIP}")
+add_subdirectory(${LASZIP})
+
 set(HEADER_FILES  
 	./src/common/attribute_type.h
   ./src/common/attribute.h
@@ -56,7 +64,10 @@ add_library(potree-converter-cpp SHARED ${SRC_FILES})
 target_include_directories(potree-converter-cpp PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   src
+  "${LASZIP}/include"
 )
+
+target_link_libraries(potree-converter-cpp laszip3)
 
 if (UNIX)
 	find_package(Threads REQUIRED)
