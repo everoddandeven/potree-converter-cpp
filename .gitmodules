@@ -1,3 +1,6 @@
 [submodule "external/json"]
 	path = external/json
 	url = https://github.com/nlohmann/json
+[submodule "external/laszip"]
+	path = external/laszip
+	url = https://github.com/LASzip/LASzip
