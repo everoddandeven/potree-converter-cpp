@@ -2,7 +2,21 @@
 
 using namespace potree;
 
-bounding_box bounding_box::child_of(vector3 min, vector3 max, int index) {
+bounding_box::bounding_box() {
+	this->min = { gen_utils::INF, gen_utils::INF, gen_utils::INF };
+	this->max = { -gen_utils::INF, -gen_utils::INF, -gen_utils::INF };
+}
+
+bounding_box::bounding_box(const vector3& min, const vector3& max) {
+	this->min = min;
+	this->max = max;
+}
+
+bounding_box bounding_box::child_of(int index) const {
+	return child_of(min, max, index);
+}
+
+bounding_box bounding_box::child_of(const vector3& min, const vector3& max, int index) {
 	bounding_box box;
 	auto size = max - min;
 	vector3 center = min + (size * 0.5);
