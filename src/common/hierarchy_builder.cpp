@@ -153,7 +153,7 @@ void hierarchy_builder::process_batch(std::shared_ptr<node_batch> batch) {
         proxyNode->proxyByteOffset = chunk->byteOffset;
         proxyNode->proxyByteSize = 22 * chunk->children.size();
       } else {
-        std::runtime_error("ERROR: didn't find chunk " + chunk->name);
+        throw std::runtime_error("ERROR: didn't find chunk " + chunk->name);
       }
     }
 
