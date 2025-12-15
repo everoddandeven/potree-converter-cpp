@@ -28,6 +28,7 @@ set(HEADER_FILES
   ./src/common/attributes.h
   ./src/common/bounding_box.h
   ./src/common/buffer.h
+  ./src/common/chunk.h
   ./src/common/cpu_data.h
   ./src/common/color.h
   ./src/common/file_source.h
@@ -50,6 +51,7 @@ set(HEADER_FILES
   ./src/utils/gen_utils.h
   ./src/utils/file_utils.h
   ./src/utils/attribute_utils.h
+  ./src/utils/chunk_utils.h
   ./src/sampler/string_utils.h
   ./src/sampler/las_utils.h
 )
@@ -66,6 +68,7 @@ set(SRC_FILES
   ./src/sampler/sampler_cell_index.cpp
   ./src/sampler/sampler_random.cpp
   ./src/utils/attribute_utils.cpp
+  ./src/utils/chunk_utils.cpp
   ./src/utils/file_utils.cpp
   ./src/utils/gen_utils.cpp
   ./src/utils/las_utils.cpp
