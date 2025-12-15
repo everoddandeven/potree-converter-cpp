@@ -32,7 +32,7 @@ set(HEADER_FILES
   ./src/common/cpu_data.h
   ./src/common/color.h
   ./src/common/file_source.h
-  ./src/common/hierarchy_builder.h
+  ./src/common/hierarchy.h
   ./src/common/las_point_f2.h
   ./src/common/memory_data.h
   ./src/common/node.h
@@ -60,7 +60,7 @@ set(HEADER_FILES
 set(SRC_FILES
   ./src/common/attributes.cpp
   ./src/common/bounding_box.cpp
-  ./src/common/hierarchy_builder.cpp
+  ./src/common/hierarchy.cpp
   ./src/common/node.cpp
   ./src/common/scale_offset.cpp
   ./src/common/vector3.cpp

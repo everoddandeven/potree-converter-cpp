@@ -1,4 +1,4 @@
-#include "hierarchy_builder.h"
+#include "hierarchy.h"
 #include "utils/string_utils.h"
 #include "utils/file_utils.h"
 #include "buffer.h"
@@ -271,4 +271,99 @@ void hierarchy_builder::build() {
   }
 
   return;
+}
+
+hierarchy_flusher::hierarchy_flusher(const std::string& path) {
+  m_path = path;
+  clear();
+}
+
+void hierarchy_flusher::clear() {
+  std::filesystem::remove_all(m_path);
+  std::filesystem::create_directories(m_path);
+}
+
+void hierarchy_flusher::flush(int step_size) {
+  std::lock_guard<std::mutex> lock(m_mtx);
+  write(m_buffer, step_size);
+  m_buffer.clear();
+}
+
+void hierarchy_flusher::write(node* n, int step_size) {
+  if (n == nullptr) throw std::runtime_error("Cannot write null flushed node");
+  std::lock_guard<std::mutex> lock(m_mtx);
+  m_buffer.push_back(*n);
+
+  if(m_buffer.size() > 10'000){
+    write(m_buffer, step_size);
+    m_buffer.clear();
+  }
+}
+
+// this structure, but guaranteed to be packed
+// struct Record{                 size   offset
+// 	uint8_t name[31];               31        0
+// 	uint32_t numPoints;              4       31
+// 	int64_t byteOffset;              8       35
+// 	int32_t byteSize;                4       43
+// 	uint8_t end = '\n';              1       47
+// };                              ===
+//                                  48
+
+void hierarchy_flusher::write(std::vector<potree::node>& nodes, int step_size) {
+  std::unordered_map<std::string, std::vector<potree::node>> groups;
+
+  for (const auto& node : nodes) {
+    std::string key = node.name.substr(0, step_size + 1);
+    if(node.name.size() <= step_size + 1){
+      key = "r";
+    }
+
+    if(groups.find(key) == groups.end()){
+      groups[key] = std::vector<potree::node>();
+    }
+
+    groups[key].push_back(node);
+
+    // add batch roots to batches (in addition to root batch)
+    if(node.name.size() == step_size + 1){
+      groups[node.name].push_back(node);
+    }
+  }
+
+  std::filesystem::create_directories(m_path);
+
+  for(auto [key, groupedNodes] : groups){
+    potree::buffer buffer(48 * groupedNodes.size());
+    std::stringstream ss;
+
+    for(int i = 0; i < groupedNodes.size(); i++){
+      auto node = groupedNodes[i];
+
+      auto name = node.name.c_str();
+      memset(buffer.data_u8 + 48 * i, ' ', 31);
+      memcpy(buffer.data_u8 + 48 * i, name, node.name.size());
+      buffer.set<uint32_t>(node.numPoints,  48 * i + 31);
+      buffer.set<uint64_t>(node.byteOffset, 48 * i + 35);
+      buffer.set<uint32_t>(node.byteSize,   48 * i + 43);
+      buffer.set<char    >('\n',             48 * i + 47);
+
+      ss << string_utils::right_pad(name, 10, ' ') 
+        << string_utils::left_pad(std::to_string(node.numPoints), 8, ' ')
+        << string_utils::left_pad(std::to_string(node.byteOffset), 12, ' ')
+        << string_utils::left_pad(std::to_string(node.byteSize), 12, ' ')
+        << std::endl;
+    }
+
+    std::string filepath = m_path + "/" + key + ".bin";
+    std::fstream fout(filepath, std::ios::app | std::ios::out | std::ios::binary);
+    fout.write(buffer.data_char, buffer.size);
+    fout.close();
+
+    if(m_chunks.find(key) == m_chunks.end()){
+      m_chunks[key] = 0;
+    }
+
+    m_chunks[key] += groupedNodes.size();
+  }
 }
