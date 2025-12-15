@@ -121,3 +121,26 @@ uint64_t gen_utils::morton_encode(unsigned int x, unsigned int y, unsigned int z
 	return answer;
 }
 
+double profile_now() {
+	static LARGE_INTEGER freq;
+	static int init = 0;
+	LARGE_INTEGER counter;
+
+	if (!init) {
+		QueryPerformanceFrequency(&freq);
+		init = 1;
+	}
+
+	QueryPerformanceCounter(&counter);
+	return (double)counter.QuadPart * 1000.0 / (double)freq.QuadPart;
+}
+
+gen_utils::profiler::profiler(const char* name) {
+	m_name = name;
+	m_start = profile_now();
+}
+
+gen_utils::profiler::~profiler() {
+	double ms = m_start - profile_now();
+	MINFO << "[PROFILE] " << m_name << ": " << std::to_string(ms) << " ms" << std::endl;
+}

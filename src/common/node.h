@@ -13,7 +13,7 @@
 using namespace nlohmann;
 
 namespace potree {
-  enum class node_type : int {
+  enum class node_type : uint8_t {
     NORMAL = 0,
     LEAF,
     PROXY,

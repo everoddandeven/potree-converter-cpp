@@ -52,8 +52,9 @@ set(HEADER_FILES
   ./src/utils/file_utils.h
   ./src/utils/attribute_utils.h
   ./src/utils/chunk_utils.h
-  ./src/sampler/string_utils.h
-  ./src/sampler/las_utils.h
+  ./src/utils/string_utils.h
+  ./src/utils/las_utils.h
+  ./src/utils/task.h
 )
 
 set(SRC_FILES
@@ -72,6 +73,7 @@ set(SRC_FILES
   ./src/utils/file_utils.cpp
   ./src/utils/gen_utils.cpp
   ./src/utils/las_utils.cpp
+  ./src/utils/task.cpp
 )
 
 add_library(potree-converter-cpp SHARED ${SRC_FILES})

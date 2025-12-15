@@ -18,6 +18,15 @@ namespace gen_utils {
 
   static const double INF = std::numeric_limits<double>::infinity();
 
+  struct profiler {
+  public:
+    profiler(const char* name);
+    ~profiler();
+  private:
+    const char* m_name;
+    double m_start;
+  };
+
   class punct_facet : public std::numpunct<char> {
   protected:
     virtual char do_decimal_point() const override { return '.'; };
