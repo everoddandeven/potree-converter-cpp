@@ -29,8 +29,9 @@ set(HEADER_FILES
   ./src/common/bounding_box.h
   ./src/common/buffer.h
   ./src/common/cpu_data.h
-  ./src/common/cumulative_color.h
+  ./src/common/color.h
   ./src/common/file_source.h
+  ./src/common/hierarchy_builder.h
   ./src/common/las_point_f2.h
   ./src/common/memory_data.h
   ./src/common/node.h
@@ -56,12 +57,16 @@ set(HEADER_FILES
 set(SRC_FILES
   ./src/common/attributes.cpp
   ./src/common/bounding_box.cpp
+  ./src/common/hierarchy_builder.cpp
+  ./src/common/node.cpp
   ./src/common/scale_offset.cpp
+  ./src/common/vector3.cpp
   ./src/las/las_info.cpp
   ./src/las/las_header.cpp
   ./src/sampler/sampler_cell_index.cpp
   ./src/sampler/sampler_random.cpp
   ./src/utils/attribute_utils.cpp
+  ./src/utils/file_utils.cpp
   ./src/utils/gen_utils.cpp
   ./src/utils/las_utils.cpp
 )

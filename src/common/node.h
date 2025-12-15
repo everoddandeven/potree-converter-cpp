@@ -3,118 +3,67 @@
 #include <vector>
 #include <mutex>
 #include <functional>
+#include "nlohmann/json.hpp"
 #include "vector3.h"
-#include "cumulative_color.h"
+#include "color.h"
 #include "buffer.h"
 #include "bounding_box.h"
+#include "attributes.h"
+
+using namespace nlohmann;
 
 namespace potree {
+  enum class node_type : int {
+    NORMAL = 0,
+    LEAF,
+    PROXY,
+  };
+
   struct node {
 
+    std::shared_ptr<node> parent;
     std::vector<std::shared_ptr<node>> children;
 
     std::string name;
     std::shared_ptr<buffer> points;
-    std::vector<cumulative_color> colors;
+    std::vector<color> colors;
     vector3 min;
     vector3 max;
 
     int64_t indexStart = 0;
-
     int64_t byteOffset = 0;
     int64_t byteSize = 0;
+    uint64_t proxyByteOffset = 0; // hierarchy
+		uint64_t proxyByteSize   = 0; // hierarchy
+
     int64_t numPoints = 0;
+    uint8_t childMask = 0; // hierarchy
+    node_type type = node_type::PROXY;
 
     bool sampled = false;
 
     node() { }
+    node(std::string name, vector3 min, vector3 max);
 
-    node(std::string name, vector3 min, vector3 max) {
-      this->name = name;
-      this->min = min;
-      this->max = max;
-      children.resize(8, nullptr);
-    }
+    int64_t level() const { return name.size() - 1; }
+    bool isLeaf() const;
+    void addDescendant(std::shared_ptr<node> descendant);
+    void traverse(std::function<void(node*, int)> callback, int level = 0);
+    void traversePost(std::function<void(node*)> callback);
+    node* find(std::string name);
 
-    int64_t level() {
-      return name.size() - 1;
-    }
+    static attributes parse_attributes(const json& metadata);
+    static std::shared_ptr<node> load_hierarchy(const std::string& path, const json& metadata);
+  };
 
-    void addDescendant(std::shared_ptr<node> descendant) {
-      static std::mutex mtx;
-      std::lock_guard<std::mutex> lock(mtx);
-
-      int descendantLevel = descendant->name.size() - 1;
-
-      node* current = this;
-
-      for (int level = 1; level < descendantLevel; level++) {
-        int index = descendant->name[level] - '0';
-
-        if (current->children[index] != nullptr) {
-          current = current->children[index].get();
-        } else {
-          std::string childName = current->name + std::to_string(index);
-          auto box = bounding_box::child_of(current->min, current->max, index);
-          auto child = std::make_shared<node>(childName, box.min, box.max);
-          current->children[index] = child;
-          current = child.get();
-        }
-      }
-
-      auto index = descendant->name[descendantLevel] - '0';
-      current->children[index] = descendant;
-    }
-
-    void traverse(std::function<void(node*)> callback) {
-      callback(this);
-
-      for (auto child : children) {
-
-        if (child != nullptr) {
-          child->traverse(callback);
-        }
-
-      }
-    }
-
-    void traversePost(std::function<void(node*)> callback) {
-      for (auto child : children) {
-
-        if (child != nullptr) {
-          child->traversePost(callback);
-        }
-      }
-
-      callback(this);
-    }
-
-    bool isLeaf() {
-
-      for (auto child : children) {
-        if (child != nullptr) {
-          return false;
-        }
-      }
-
-
-      return true;
-    }
-
-    node* find(std::string name){
-
-      node* current = this;
-
-      int depth = name.size() - 1;
-
-      for(int level = 1; level <= depth; level++){
-        int index = name.at(level) - '0';
-
-        current = current->children[index].get();
-      }
-
-      return current;
-    }
-
+  struct node_batch {
+    std::string name;
+    std::string path;
+    int numNodes = 0;
+    int64_t byteSize = 0;
+    std::vector<std::shared_ptr<node>> nodes;
+    std::vector<std::shared_ptr<node>> chunks;
+    std::unordered_map<std::string, std::shared_ptr<node>> node_map;
+    std::unordered_map<std::string, std::shared_ptr<node>> chunk_map;
   };
 }

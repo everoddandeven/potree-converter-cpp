@@ -33,3 +33,19 @@ bounding_box bounding_box::child_of(vector3 min, vector3 max, int index) {
 
 	return box;
 }
+
+bounding_box bounding_box::parse(const json& metadata) {
+	bounding_box bbox;
+	bbox.min = {
+		metadata["min"][0].get<double>(),
+		metadata["min"][1].get<double>(),
+		metadata["min"][2].get<double>()
+	};
+	bbox.max = {
+		metadata["max"][0].get<double>(),
+		metadata["max"][1].get<double>(),
+		metadata["max"][2].get<double>()
+	};
+
+	return bbox;
+}

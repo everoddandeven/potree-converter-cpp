@@ -2,6 +2,9 @@
 
 #include "vector3.h"
 #include "utils/gen_utils.h"
+#include "nlohmann/json.hpp"
+
+using namespace nlohmann;
 
 namespace potree {
 
@@ -20,6 +23,7 @@ namespace potree {
     }
 
     static bounding_box child_of(vector3 min, vector3 max, int index);
+    static bounding_box parse(const json& metadata);
   };
 
 }

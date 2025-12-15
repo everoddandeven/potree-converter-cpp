@@ -3,7 +3,7 @@
 
 namespace potree {
   
-  struct cumulative_color {
+  struct color {
     int64_t r = 0;
     int64_t g = 0;
     int64_t b = 0;

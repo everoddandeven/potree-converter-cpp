@@ -7,11 +7,14 @@
 #include <algorithm>
 #include <string>
 #include <iomanip>
+#include "nlohmann/json.hpp"
+
+using namespace nlohmann;
 
 namespace potree {
 
 	struct vector3 {
-
+	public:
 		double x = double(0.0);
 		double y = double(0.0);
 		double z = double(0.0);
@@ -80,6 +83,12 @@ namespace potree {
 			ss << x << ", " << y << ", " << z;
 			return ss.str();
 		}
+
+		static vector3 parse_min(const json& bounding_box_json);
+		static vector3 parse_max(const json& bounding_box_json);
+	
+	private:
+		static vector3 parse(const json& bounding_box_json, const std::string& field);
 
 	};
 
