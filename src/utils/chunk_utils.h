@@ -7,6 +7,9 @@
 
 namespace potree {
 namespace chunk_utils {
+  namespace chunker {
+    void do_chunking(const std::vector<file_source>& sources, const std::string& target_dir, const vector3& min, const vector3& max, const std::shared_ptr<status>& state, const attributes& out_attrs, const std::shared_ptr<gen_utils::monitor>& monitor);
+  }
 
   std::shared_ptr<chunks> load_chunks(const std::string& path_in);
   void refine_chunk(const std::shared_ptr<chunk>& chunk, const attributes& attrs);

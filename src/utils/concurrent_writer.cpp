@@ -5,7 +5,7 @@
 using namespace potree;
 using namespace std::chrono_literals;
 
-concurrent_writer::concurrent_writer(size_t num_threads, status& state) {
+concurrent_writer::concurrent_writer(size_t num_threads, std::shared_ptr<status>& state) {
   m_num_threads = num_threads;
   m_t_start = gen_utils::now();
   init(state);
@@ -15,7 +15,7 @@ concurrent_writer::~concurrent_writer() {
   join();
 }
 
-void concurrent_writer::init(status& state) {
+void concurrent_writer::init(std::shared_ptr<status>& state) {
   for (int64_t i = 0; i < m_num_threads; i++) {
     m_threads.emplace_back([&]() {
       flush_thread();
@@ -38,7 +38,7 @@ void concurrent_writer::init(status& state) {
         double duration = gen_utils::now() - m_t_start;
         double throughput = mb_done / duration;
 
-        state.name = "DISTRIBUITING";
+        state->name = "DISTRIBUITING";
       }
 
       std::this_thread::sleep_for(100ms);

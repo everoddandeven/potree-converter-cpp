@@ -8,14 +8,14 @@ namespace potree {
 
   struct concurrent_writer {
   public:
-    concurrent_writer(size_t num_threads, status& state);
+    concurrent_writer(size_t num_threads, std::shared_ptr<status>& state);
     ~concurrent_writer();
 
     void wait_for_memory_threshold(int64_t threshold);
     void write(const std::string& path, const std::shared_ptr<potree::buffer>& data);
     void join();
   private:
-    potree::status m_state;
+    std::shared_ptr<potree::status> m_state;
     std::unordered_map<std::string, std::vector<std::shared_ptr<potree::buffer>>> m_todo;
     std::unordered_map<std::string, int> m_locks;
     std::atomic_int64_t m_bytes_todo = 0;
@@ -27,7 +27,7 @@ namespace potree {
     bool m_join_requested = false;
     double m_t_start = 0;
 
-    void init(status& state);
+    void init(std::shared_ptr<status>& state);
     void flush_thread();
   };
 

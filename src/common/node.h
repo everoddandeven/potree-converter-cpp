@@ -32,6 +32,9 @@ namespace potree {
     vector3 min;
     vector3 max;
 
+    int64_t x = 0; // chunk_utils
+    int64_t y = 0; // chunk_utils
+    int64_t z = 0; // chunk_utils
     int64_t level = 0; // chunk_utils
     int64_t size = 0; // chunk_utils
     int64_t indexStart = 0;
