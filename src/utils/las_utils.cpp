@@ -124,6 +124,71 @@ private:
 	}
 };
 
+void write_metadata(const std::string& path, const vector3& min, const vector3& max, const attributes& attrs) {
+	json js;
+
+	js["min"] = { min.x, min.y, min.z };
+	js["max"] = { max.x, max.y, max.z };
+
+	js["attributes"] = {};
+	for (const auto& attribute : attrs.list) {
+
+		json js_attr;
+		js_attr["name"] = attribute.name;
+		js_attr["size"] = attribute.size;
+		js_attr["numElements"] = attribute.numElements;
+		js_attr["elementSize"] = attribute.elementSize;
+		js_attr["description"] = attribute.description;
+		js_attr["type"] = attribute_utils::get_name(attribute.type);
+
+		if (attribute.numElements == 1) {
+			js_attr["min"] = std::vector<double>{ attribute.min.x };
+			js_attr["max"] = std::vector<double>{ attribute.max.x };
+			js_attr["scale"] = std::vector<double>{ attribute.scale.x };
+			js_attr["offset"] = std::vector<double>{ attribute.offset.x };
+		} else if (attribute.numElements == 2) {
+			js_attr["min"] = std::vector<double>{ attribute.min.x, attribute.min.y};
+			js_attr["max"] = std::vector<double>{ attribute.max.x, attribute.max.y};
+			js_attr["scale"] = std::vector<double>{ attribute.scale.x, attribute.scale.y};
+			js_attr["offset"] = std::vector<double>{ attribute.offset.x, attribute.offset.y};
+		} else if (attribute.numElements == 3) {
+			js_attr["min"] = std::vector<double>{ attribute.min.x, attribute.min.y, attribute.min.z };
+			js_attr["max"] = std::vector<double>{ attribute.max.x, attribute.max.y, attribute.max.z };
+			js_attr["scale"] = std::vector<double>{ attribute.scale.x, attribute.scale.y, attribute.scale.z };
+			js_attr["offset"] = std::vector<double>{ attribute.offset.x, attribute.offset.y, attribute.offset.z };
+		}
+
+		bool emptyHistogram = true;
+		for(int i = 0; i < attribute.histogram.size(); i++){
+			if(attribute.histogram[i] != 0){
+				emptyHistogram = false;
+			}
+		}
+
+		if(attribute.size == 1 && !emptyHistogram){
+			json jsHistogram = attribute.histogram;
+
+			js_attr["histogram"] = jsHistogram;
+		}
+
+		js["attributes"].push_back(js_attr);
+	}
+
+	js["scale"] = std::vector<double>({
+		attrs.posScale.x, 
+		attrs.posScale.y, 
+		attrs.posScale.z});
+
+	js["offset"] = std::vector<double>({
+		attrs.posOffset.x,
+		attrs.posOffset.y,
+		attrs.posOffset.z });
+
+	string content = js.dump(4);
+
+	file_utils::write_text(path, content);
+}
+
 std::vector<attribute> las_utils::parse_extra_attributes(const las_header& header) {
 	std::vector<attribute> attrs;
 
@@ -447,4 +512,285 @@ void las_utils::to_laz(const std::string& potree_path) {
 		save(target, points, bbox.min, bbox.max);
 	}
 
+}
+
+std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
+	laszip_header* header, uint8_t* data, laszip_point* point, 
+	attributes& inputAttributes, attributes& outputAttributes
+) {
+	std::vector<las_utils::attribute_handler> handlers;
+
+	int attributeOffset = 0;
+
+	// reset min/max, we're writing the values to a per-thread copy anyway
+	for (auto& attribute : outputAttributes.list) {
+		attribute.min = { gen_utils::INF, gen_utils::INF, gen_utils::INF };
+		attribute.max = { -gen_utils::INF, -gen_utils::INF, -gen_utils::INF };
+	}
+
+	{ // STANDARD LAS ATTRIBUTES
+
+		int offsetRGB = outputAttributes.getOffset("rgb");
+		attribute* attributeRGB = outputAttributes.get("rgb");
+		auto rgb = [data, point, header, offsetRGB, attributeRGB](int64_t offset) {
+			if (offsetRGB >= 0) {
+
+				uint16_t rgb[] = { 0, 0, 0 };
+				memcpy(rgb, &point->rgb, 6);
+				memcpy(data + offset + offsetRGB, rgb, 6);
+				
+				attributeRGB->min.x = std::min(attributeRGB->min.x, double(rgb[0]));
+				attributeRGB->min.y = std::min(attributeRGB->min.y, double(rgb[1]));
+				attributeRGB->min.z = std::min(attributeRGB->min.z, double(rgb[2]));
+
+				attributeRGB->max.x = std::max(attributeRGB->max.x, double(rgb[0]));
+				attributeRGB->max.y = std::max(attributeRGB->max.y, double(rgb[1]));
+				attributeRGB->max.z = std::max(attributeRGB->max.z, double(rgb[2]));
+			}
+		};
+
+		int offsetIntensity = outputAttributes.getOffset("intensity");
+		attribute* attributeIntensity = outputAttributes.get("intensity");
+		auto intensity = [data, point, header, offsetIntensity, attributeIntensity](int64_t offset) {
+			memcpy(data + offset + offsetIntensity, &point->intensity, 2);
+
+			attributeIntensity->min.x = std::min(attributeIntensity->min.x, double(point->intensity));
+			attributeIntensity->max.x = std::max(attributeIntensity->max.x, double(point->intensity));
+		};
+
+		int offsetReturnNumber = outputAttributes.getOffset("return number");
+		attribute* attributeReturnNumber = outputAttributes.get("return number");
+		auto returnNumber = [data, point, header, offsetReturnNumber, attributeReturnNumber](int64_t offset) {
+			uint8_t value = point->return_number;
+
+			memcpy(data + offset + offsetReturnNumber, &value, 1);
+
+			attributeReturnNumber->min.x = std::min(attributeReturnNumber->min.x, double(value));
+			attributeReturnNumber->max.x = std::max(attributeReturnNumber->max.x, double(value));
+		};
+
+		int offsetNumberOfReturns = outputAttributes.getOffset("number of returns");
+		attribute* attributeNumberOfReturns = outputAttributes.get("number of returns");
+		auto numberOfReturns = [data, point, header, offsetNumberOfReturns, attributeNumberOfReturns](int64_t offset) {
+			uint8_t value = point->number_of_returns;
+
+			memcpy(data + offset + offsetNumberOfReturns, &value, 1);
+
+			attributeNumberOfReturns->min.x = std::min(attributeNumberOfReturns->min.x, double(value));
+			attributeNumberOfReturns->max.x = std::max(attributeNumberOfReturns->max.x, double(value));
+		};
+
+		int offsetScanAngleRank = outputAttributes.getOffset("scan angle rank");
+		attribute* attributeScanAngleRank = outputAttributes.get("scan angle rank");
+		auto scanAngleRank = [data, point, header, offsetScanAngleRank, attributeScanAngleRank](int64_t offset) {
+			memcpy(data + offset + offsetScanAngleRank, &point->scan_angle_rank, 1);
+
+			attributeScanAngleRank->min.x = std::min(attributeScanAngleRank->min.x, double(point->scan_angle_rank));
+			attributeScanAngleRank->max.x = std::max(attributeScanAngleRank->max.x, double(point->scan_angle_rank));
+		};
+
+		int offsetScanAngle= outputAttributes.getOffset("scan angle");
+		attribute* attributeScanAngle = outputAttributes.get("scan angle");
+		auto scanAngle = [data, point, header, offsetScanAngle, attributeScanAngle](int64_t offset) {
+			memcpy(data + offset + offsetScanAngle, &point->extended_scan_angle, 2);
+
+			attributeScanAngle->min.x = std::min(attributeScanAngle->min.x, double(point->extended_scan_angle));
+			attributeScanAngle->max.x = std::max(attributeScanAngle->max.x, double(point->extended_scan_angle));
+		};
+
+		int offsetUserData = outputAttributes.getOffset("user data");
+		attribute* attributeUserData = outputAttributes.get("user data");
+		auto userData = [data, point, header, offsetUserData, attributeUserData](int64_t offset) {
+			memcpy(data + offset + offsetUserData, &point->user_data, 1);
+
+			attributeUserData->min.x = std::min(attributeUserData->min.x, double(point->user_data));
+			attributeUserData->max.x = std::max(attributeUserData->max.x, double(point->user_data));
+		};
+
+		int offsetClassification = outputAttributes.getOffset("classification");
+		attribute* attributeClassification = outputAttributes.get("classification");
+		auto classification = [data, point, header, offsetClassification, attributeClassification](int64_t offset) {
+			
+			uint8_t value = 0;
+			if (point->extended_classification > 31){
+				value = point->extended_classification;
+			}else{
+				value = point->classification;
+			}
+
+			data[offset + offsetClassification] = value;
+			attributeClassification->histogram[value]++;
+
+			attributeClassification->min.x = std::min(attributeClassification->min.x, double(value));
+			attributeClassification->max.x = std::max(attributeClassification->max.x, double(value));
+		};
+
+		int offsetSourceId = outputAttributes.getOffset("point source id");
+		attribute* attributePointSourceId = outputAttributes.get("point source id");
+		auto pointSourceId = [data, point, header, offsetSourceId, attributePointSourceId](int64_t offset) {
+			memcpy(data + offset + offsetSourceId, &point->point_source_ID, 2);
+
+			attributePointSourceId->min.x = std::min(attributePointSourceId->min.x, double(point->point_source_ID));
+			attributePointSourceId->max.x = std::max(attributePointSourceId->max.x, double(point->point_source_ID));
+		};
+
+		int offsetGpsTime= outputAttributes.getOffset("gps-time");
+		attribute* attributeGpsTime = outputAttributes.get("gps-time");
+		auto gpsTime = [data, point, header, offsetGpsTime, attributeGpsTime](int64_t offset) {
+			memcpy(data + offset + offsetGpsTime, &point->gps_time, 8);
+
+			attributeGpsTime->min.x = std::min(attributeGpsTime->min.x, point->gps_time);
+			attributeGpsTime->max.x = std::max(attributeGpsTime->max.x, point->gps_time);
+		};
+
+		int offsetClassificationFlags = outputAttributes.getOffset("classification flags");
+		attribute* attributeClassificationFlags = outputAttributes.get("classification flags");
+		auto classificationFlags = [data, point, header, offsetClassificationFlags, attributeClassificationFlags](int64_t offset) {
+			uint8_t value = point->extended_classification_flags;
+
+			memcpy(data + offset + offsetClassificationFlags, &value, 1);
+
+			attributeClassificationFlags->min.x = std::min(attributeClassificationFlags->min.x, double(point->extended_classification_flags));
+			attributeClassificationFlags->max.x = std::max(attributeClassificationFlags->max.x, double(point->extended_classification_flags));
+		};
+
+		unordered_map<string, function<void(int64_t)>> mapping = {
+			{"rgb", rgb},
+			{"intensity", intensity},
+			{"return number", returnNumber},
+			{"number of returns", numberOfReturns},
+			{"classification", classification},
+			{"scan angle rank", scanAngleRank},
+			{"scan angle", scanAngle},
+			{"user data", userData},
+			{"point source id", pointSourceId},
+			{"gps-time", gpsTime},
+			{"classification flags", classificationFlags},
+		};
+
+		for (auto& attribute : inputAttributes.list) {
+
+			attributeOffset += attribute.size;
+
+			if (attribute.name == "position") {
+				continue;
+			}
+
+			bool standardMappingExists = mapping.find(attribute.name) != mapping.end();
+			bool isIncludedInOutput = outputAttributes.get(attribute.name) != nullptr;
+			if (standardMappingExists && isIncludedInOutput) {
+				handlers.push_back(mapping[attribute.name]);
+			}
+		}
+	}
+
+	{ // EXTRA ATTRIBUTES
+
+		// mapping from las format to index of first extra attribute
+		// +1 for all formats with returns, which is split into return number and number of returns
+		unordered_map<int, int> formatToExtraIndex = {
+			{0, 8},
+			{1, 9},
+			{2, 9},
+			{3, 10},
+			{4, 14},
+			{5, 15},
+			{6, 10},
+			{7, 11},
+		};
+
+		bool noMapping = formatToExtraIndex.find(header->point_data_format) == formatToExtraIndex.end();
+		if (noMapping) {
+			string msg = "ERROR: las format not supported: " + gen_utils::format_number(header->point_data_format) + "\n";
+			cout << msg;
+
+			exit(123);
+		}
+
+		// handle extra bytes individually to compute per-attribute information
+		int firstExtraIndex = formatToExtraIndex[header->point_data_format];
+		int sourceOffset = 0;
+
+		int attributeOffset = 0;
+		for (int i = 0; i < firstExtraIndex; i++) {
+			attributeOffset += inputAttributes.list[i].size;
+		}
+
+		for (int i = firstExtraIndex; i < inputAttributes.list.size(); i++) {
+			attribute& inputAttribute = inputAttributes.list[i];
+			attribute* attribute = outputAttributes.get(inputAttribute.name);
+			int targetOffset = outputAttributes.getOffset(inputAttribute.name);
+
+			int attributeSize = inputAttribute.size;
+
+			if (attribute != nullptr) {
+				auto handleAttribute = [data, point, header, attributeSize, attributeOffset, sourceOffset, attribute](int64_t offset) {
+					memcpy(data + offset + attributeOffset, point->extra_bytes + sourceOffset, attributeSize);
+
+					std::function<double(uint8_t*)> f;
+
+					// TODO: shouldn't use DOUBLE as a unifying type
+					// it won't work with uint64_t and int64_t
+					if (attribute->type == attribute_type::INT8) {
+						f = gen_utils::read_double<int8_t>;
+					} else if (attribute->type == attribute_type::INT16) {
+						f = gen_utils::read_double<int16_t>;
+					} else if (attribute->type == attribute_type::INT32) {
+						f = gen_utils::read_double<int32_t>;
+					} else if (attribute->type == attribute_type::INT64) {
+						f = gen_utils::read_double<int64_t>;
+					} else if (attribute->type == attribute_type::UINT8) {
+						f = gen_utils::read_double<uint8_t>;
+					} else if (attribute->type == attribute_type::UINT16) {
+						f = gen_utils::read_double<uint16_t>;
+					} else if (attribute->type == attribute_type::UINT32) {
+						f = gen_utils::read_double<uint32_t>;
+					} else if (attribute->type == attribute_type::UINT64) {
+						f = gen_utils::read_double<uint64_t>;
+					} else if (attribute->type == attribute_type::FLOAT) {
+						f = gen_utils::read_double<float>;
+					} else if (attribute->type == attribute_type::DOUBLE) {
+						f = gen_utils::read_double<double>;
+					}
+
+					if (attribute->numElements == 1) {
+						double x = f(point->extra_bytes + sourceOffset);
+
+						attribute->min.x = std::min(attribute->min.x, x);
+						attribute->max.x = std::max(attribute->max.x, x);
+					} else if (attribute->numElements == 2) {
+						double x = f(point->extra_bytes + sourceOffset + 0 * attribute->elementSize);
+						double y = f(point->extra_bytes + sourceOffset + 1 * attribute->elementSize);
+
+						attribute->min.x = std::min(attribute->min.x, x);
+						attribute->min.y = std::min(attribute->min.y, y);
+						attribute->max.x = std::max(attribute->max.x, x);
+						attribute->max.y = std::max(attribute->max.y, y);
+
+					} else if (attribute->numElements == 3) {
+						double x = f(point->extra_bytes + sourceOffset + 0 * attribute->elementSize);
+						double y = f(point->extra_bytes + sourceOffset + 1 * attribute->elementSize);
+						double z = f(point->extra_bytes + sourceOffset + 2 * attribute->elementSize);
+
+						attribute->min.x = std::min(attribute->min.x, x);
+						attribute->min.y = std::min(attribute->min.y, y);
+						attribute->min.z = std::min(attribute->min.z, z);
+						attribute->max.x = std::max(attribute->max.x, x);
+						attribute->max.y = std::max(attribute->max.y, y);
+						attribute->max.z = std::max(attribute->max.z, z);
+					}
+
+
+				};
+
+				handlers.push_back(handleAttribute);
+				attributeOffset += attribute->size;
+			}
+
+			sourceOffset += inputAttribute.size;
+		}
+
+	}
+	
+	return handlers;
 }
