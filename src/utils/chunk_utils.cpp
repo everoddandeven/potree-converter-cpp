@@ -169,3 +169,55 @@ void chunk_utils::refine(const std::string& target_dir, const status& state) {
     refine_chunk(chunk, chunks->m_attributes);
   }
 }
+
+std::string chunk_utils::build_id(int level, int grid_size, int64_t x, int64_t y, int64_t z) {
+  std::string id = "r";
+
+  int currentGridSize = grid_size;
+  int lx = x;
+  int ly = y;
+  int lz = z;
+
+  for (int i = 0; i < level; i++) {
+
+    int index = 0;
+
+    if (lx >= currentGridSize / 2) {
+      index = index + 0b100;
+      lx = lx - currentGridSize / 2;
+    }
+
+    if (ly >= currentGridSize / 2) {
+      index = index + 0b010;
+      ly = ly - currentGridSize / 2;
+    }
+
+    if (lz >= currentGridSize / 2) {
+      index = index + 0b001;
+      lz = lz - currentGridSize / 2;
+    }
+
+    id = id + std::to_string(index);
+    currentGridSize = currentGridSize / 2;
+  }
+
+  return id;
+}
+
+void chunk_utils::add_buckets(const std::vector<potree::node>& nodes, const std::vector<std::shared_ptr<potree::buffer>>& buckets, const std::shared_ptr<concurrent_writer>& writer, const std::string& target_dir) {
+  if (writer == nullptr) throw std::runtime_error("Cannot add new buckets: concurrent writer is null");
+  
+  for(int nodeIndex = 0; nodeIndex < nodes.size(); nodeIndex++){
+
+    if (buckets[nodeIndex]->size == 0) {
+      continue;
+    }
+
+    auto& node = nodes[nodeIndex];
+    std::string path = target_dir + "/chunks/" + node.id + ".bin";
+    auto buffer = buckets[nodeIndex];
+
+    writer->write(path, buffer);
+  }
+
+}

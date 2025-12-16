@@ -4,11 +4,16 @@
 
 using namespace potree;
 
-node::node(std::string name, vector3 min, vector3 max) {
+node::node(const std::string& name, const vector3& min, const vector3& max) {
   this->name = name;
   this->min = min;
   this->max = max;
   children.resize(8, nullptr);
+}
+
+node::node(const std::string& id, int num_points) {
+  this->id = id;
+  numPoints = num_points;
 }
 
 bool node::isLeaf() const {
@@ -111,7 +116,7 @@ attributes node::parse_attributes(const json& metadata) {
   return attrs;
 }
 
-std::shared_ptr<node> node::load_hierarchy(const std::string& path, const json& metadata) {
+std::shared_ptr<potree::node> node::load_hierarchy(const std::string& path, const json& metadata) {
   auto buffer = file_utils::read_binary(path + "/hierarchy.bin");
   auto hierarchy_md = metadata["hierarchy"];
   int64_t first_chunk_size = metadata["firstChunkSize"];
@@ -162,5 +167,21 @@ std::shared_ptr<node> node::load_hierarchy(const std::string& path, const json& 
   }
 
   return root;
+}
+
+std::vector<int64_t_point> node::get_points(const attributes& attrs) const {
+  std::vector<int64_t_point> pts;
+
+  for(int64_t i = 0; i < numPoints; i++) {
+    int64_t offset = i * attrs.bytes;
+
+    int32_t sX, sY, sZ;
+    memcpy(&sX, points->data_u8 + offset + 0, 4);
+    memcpy(&sY, points->data_u8 + offset + 4, 4);
+    memcpy(&sZ, points->data_u8 + offset + 8, 4);
+    pts.push_back({sX, sY, sZ});
+  }
+
+  return pts;
 }
 

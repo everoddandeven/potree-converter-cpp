@@ -1,12 +1,16 @@
 
-#include "gen_utils.h"
+#include <chrono>
 #include "TCHAR.h"
 #include "pdh.h"
 #include "windows.h"
 #include "psapi.h"
 #include <thread>
+#include "gen_utils.h"
 
 using namespace potree;
+using std::chrono::high_resolution_clock;
+
+static const long long start_time = high_resolution_clock::now().time_since_epoch().count();
 
 static ULARGE_INTEGER lastCPU, lastSysCPU, lastUserCPU;
 static int numProcessors;
@@ -121,6 +125,13 @@ uint64_t gen_utils::morton_encode(unsigned int x, unsigned int y, unsigned int z
 	return answer;
 }
 
+double gen_utils::now() {
+	auto now = std::chrono::high_resolution_clock::now();
+	long long nanosSinceStart = now.time_since_epoch().count() - start_time;
+	double secondsSinceStart = double(nanosSinceStart) / 1'000'000'000.0;
+	return secondsSinceStart;
+}
+
 double profile_now() {
 	static LARGE_INTEGER freq;
 	static int init = 0;
@@ -143,4 +154,57 @@ gen_utils::profiler::profiler(const char* name) {
 gen_utils::profiler::~profiler() {
 	double ms = m_start - profile_now();
 	MINFO << "[PROFILE] " << m_name << ": " << std::to_string(ms) << " ms" << std::endl;
+}
+
+gen_utils::monitor::monitor(const std::shared_ptr<potree::status>& state) {
+	m_state = state;
+}
+
+void gen_utils::monitor::print() {
+	auto ram = get_memory_data();
+	auto CPU = get_cpu_data();
+	double GB = 1024.0 * 1024.0 * 1024.0;
+
+	double throughput = (double(m_state->pointsProcessed) / m_state->duration) / 1'000'000.0;
+
+	double progressPass = 100.0 * m_state->progress();
+	double progressTotal = (100.0 * double(m_state->currentPass - 1) + progressPass) / double(m_state->numPasses);
+
+	std::string strProgressPass = format_number(progressPass) + "%";
+	std::string strProgressTotal = format_number(progressTotal) + "%";
+	std::string strTime = format_number(now()) + "s";
+	std::string strDuration = format_number(m_state->duration) + "s";
+	std::string strThroughput = format_number(throughput) + "MPs";
+
+	std::string strRAM = format_number(double(ram.virtual_usedByProcess) / GB, 1)
+		+ "GB (highest " + format_number(double(ram.virtual_usedByProcess_max) / GB, 1) + "GB)";
+	std::string strCPU = format_number(CPU.usage) + "%";
+
+	std::stringstream ss;
+	ss << "[" << strProgressTotal << ", " << strTime << "], "
+		<< "[" << m_state->name << ": " << strProgressPass 
+		<< ", duration: " << strDuration 
+		<< ", throughput: " << strThroughput << "]"
+		<< "[RAM: " << strRAM << ", CPU: " << strCPU << "]" << std::endl;
+
+	std::cout << ss.str() << std::flush;
+}
+
+void gen_utils::monitor::start() {
+	monitor* _this = this;
+	m_thread = std::thread([_this]() {
+		using namespace std::chrono_literals;
+		std::this_thread::sleep_for(1'000ms);
+		std::cout << std::endl;
+
+		while (!_this->m_stop_requested) {
+			_this->print();
+			std::this_thread::sleep_for(1'000ms);
+		}
+	});
+}
+
+void gen_utils::monitor::stop() {
+	m_stop_requested = true;
+	m_thread.join();
 }

@@ -37,6 +37,7 @@ set(HEADER_FILES
   ./src/common/memory_data.h
   ./src/common/node.h
   ./src/common/options.h
+  ./src/common/point.h
   ./src/common/scale_offset.h
   ./src/common/status.h
   ./src/common/vector3.h
@@ -52,6 +53,7 @@ set(HEADER_FILES
   ./src/utils/file_utils.h
   ./src/utils/attribute_utils.h
   ./src/utils/chunk_utils.h
+  ./src/utils/concurrent_writer.h
   ./src/utils/string_utils.h
   ./src/utils/las_utils.h
   ./src/utils/task.h
@@ -62,6 +64,7 @@ set(SRC_FILES
   ./src/common/bounding_box.cpp
   ./src/common/hierarchy.cpp
   ./src/common/node.cpp
+  ./src/common/point.cpp
   ./src/common/scale_offset.cpp
   ./src/common/vector3.cpp
   ./src/las/las_info.cpp
@@ -70,6 +73,7 @@ set(SRC_FILES
   ./src/sampler/sampler_random.cpp
   ./src/utils/attribute_utils.cpp
   ./src/utils/chunk_utils.cpp
+  ./src/utils/concurrent_writer.cpp
   ./src/utils/file_utils.cpp
   ./src/utils/gen_utils.cpp
   ./src/utils/las_utils.cpp

@@ -8,6 +8,7 @@
 #include <sstream>
 #include "common/memory_data.h"
 #include "common/cpu_data.h"
+#include "common/status.h"
 
 #define MINFO std::cout << "INFO: "
 #define MERROR std::cout << "ERROR(" << __FILE__ << ":" << __LINE__ << "): "
@@ -26,6 +27,21 @@ namespace gen_utils {
     const char* m_name;
     double m_start;
   };
+
+  struct monitor {
+  public:
+    monitor(const std::shared_ptr<potree::status>& state);
+    void start();
+    void stop();
+  private:
+    std::thread m_thread;
+    bool m_stop_requested = false;
+    std::shared_ptr<potree::status> m_state;
+
+    void print();
+  };
+
+  double now();
 
   class punct_facet : public std::numpunct<char> {
   protected:
@@ -46,6 +62,12 @@ namespace gen_utils {
     ss << number;
     return ss.str();
   };
+
+	template<class T>
+	static inline double read_double(uint8_t* data) {
+		T value = reinterpret_cast<T*>(data)[0];
+		return double(value);
+	}
 
   template<typename T>
   static inline T read_value(std::vector<uint8_t>& buffer, int offset) {

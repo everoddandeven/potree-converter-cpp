@@ -9,6 +9,7 @@
 #include "buffer.h"
 #include "bounding_box.h"
 #include "attributes.h"
+#include "point.h"
 
 using namespace nlohmann;
 
@@ -20,16 +21,19 @@ namespace potree {
   };
 
   struct node {
-
+  public:
     std::shared_ptr<node> parent;
     std::vector<std::shared_ptr<node>> children;
 
+    std::string id; // chunk_utils
     std::string name;
     std::shared_ptr<buffer> points;
     std::vector<color> colors;
     vector3 min;
     vector3 max;
 
+    int64_t level = 0; // chunk_utils
+    int64_t size = 0; // chunk_utils
     int64_t indexStart = 0;
     int64_t byteOffset = 0;
     int64_t byteSize = 0;
@@ -43,17 +47,19 @@ namespace potree {
     bool sampled = false;
 
     node() { }
-    node(std::string name, vector3 min, vector3 max);
+    node(const std::string& name, const vector3& min, const vector3& max);
+    node(const std::string& id, int num_points);
 
-    int64_t level() const { return name.size() - 1; }
+    int64_t get_level() const { return name.size() - 1; }
     bool isLeaf() const;
     void addDescendant(std::shared_ptr<node> descendant);
     void traverse(std::function<void(node*, int)> callback, int level = 0);
     void traversePost(std::function<void(node*)> callback);
     node* find(std::string name);
+    std::vector<int64_t_point> get_points(const attributes& attrs) const;
 
     static attributes parse_attributes(const json& metadata);
-    static std::shared_ptr<node> load_hierarchy(const std::string& path, const json& metadata);
+    static std::shared_ptr<potree::node> load_hierarchy(const std::string& path, const json& metadata);
   };
 
   struct node_batch {
