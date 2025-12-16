@@ -208,3 +208,7 @@ void gen_utils::monitor::stop() {
 	m_stop_requested = true;
 	m_thread.join();
 }
+
+size_t gen_utils::get_num_processors() {
+	return get_cpu_data().numProcessors;
+}

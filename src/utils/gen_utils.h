@@ -81,5 +81,6 @@ namespace gen_utils {
 
   memory_data get_memory_data();
   cpu_data get_cpu_data();
+  size_t get_num_processors();
 }
 }
