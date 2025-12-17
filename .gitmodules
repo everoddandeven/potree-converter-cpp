@@ -4,3 +4,6 @@
 [submodule "external/laszip"]
 	path = external/laszip
 	url = https://github.com/LASzip/LASzip
+[submodule "external/brotli"]
+	path = external/brotli
+	url = https://github.com/google/brotli
