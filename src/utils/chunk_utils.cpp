@@ -1,7 +1,6 @@
 #include <filesystem>
 #include "common/node.h"
 #include "chunk_utils.h"
-#include "gen_utils.h"
 #include "utils/task.h"
 #include "utils/file_utils.h"
 #include "utils/attribute_utils.h"
@@ -11,6 +10,71 @@
 using namespace potree;
 
 static const int64_t MAX_POINTS_PER_CHUNK = 10'000'000;
+
+void write_metadata(const std::string& path, const vector3& min, const vector3& max, const attributes& attrs) {
+	json js;
+
+	js["min"] = { min.x, min.y, min.z };
+	js["max"] = { max.x, max.y, max.z };
+
+	js["attributes"] = {};
+	for (const auto& attribute : attrs.list) {
+
+		json js_attr;
+		js_attr["name"] = attribute.name;
+		js_attr["size"] = attribute.size;
+		js_attr["numElements"] = attribute.numElements;
+		js_attr["elementSize"] = attribute.elementSize;
+		js_attr["description"] = attribute.description;
+		js_attr["type"] = attribute_utils::get_name(attribute.type);
+
+		if (attribute.numElements == 1) {
+			js_attr["min"] = std::vector<double>{ attribute.min.x };
+			js_attr["max"] = std::vector<double>{ attribute.max.x };
+			js_attr["scale"] = std::vector<double>{ attribute.scale.x };
+			js_attr["offset"] = std::vector<double>{ attribute.offset.x };
+		} else if (attribute.numElements == 2) {
+			js_attr["min"] = std::vector<double>{ attribute.min.x, attribute.min.y};
+			js_attr["max"] = std::vector<double>{ attribute.max.x, attribute.max.y};
+			js_attr["scale"] = std::vector<double>{ attribute.scale.x, attribute.scale.y};
+			js_attr["offset"] = std::vector<double>{ attribute.offset.x, attribute.offset.y};
+		} else if (attribute.numElements == 3) {
+			js_attr["min"] = std::vector<double>{ attribute.min.x, attribute.min.y, attribute.min.z };
+			js_attr["max"] = std::vector<double>{ attribute.max.x, attribute.max.y, attribute.max.z };
+			js_attr["scale"] = std::vector<double>{ attribute.scale.x, attribute.scale.y, attribute.scale.z };
+			js_attr["offset"] = std::vector<double>{ attribute.offset.x, attribute.offset.y, attribute.offset.z };
+		}
+
+		bool emptyHistogram = true;
+		for(int i = 0; i < attribute.histogram.size(); i++){
+			if(attribute.histogram[i] != 0){
+				emptyHistogram = false;
+			}
+		}
+
+		if(attribute.size == 1 && !emptyHistogram){
+			json jsHistogram = attribute.histogram;
+
+			js_attr["histogram"] = jsHistogram;
+		}
+
+		js["attributes"].push_back(js_attr);
+	}
+
+	js["scale"] = std::vector<double>({
+		attrs.posScale.x, 
+		attrs.posScale.y, 
+		attrs.posScale.z});
+
+	js["offset"] = std::vector<double>({
+		attrs.posOffset.x,
+		attrs.posOffset.y,
+		attrs.posOffset.z });
+
+	string content = js.dump(4);
+
+	file_utils::write_text(path, content);
+}
 
 void for_xyz(int64_t size, std::function<void(int64_t, int64_t, int64_t)> callback) {
   for(int64_t x = 0; x < size; x++) {
@@ -176,6 +240,7 @@ public:
   std::shared_ptr<status> m_state;
   attributes m_out_attributes;
   std::shared_ptr<gen_utils::monitor> m_monitor;
+  // end params
   std::vector<potree::node> m_nodes;
   std::unique_ptr<task_pool> m_pool;
 
@@ -465,6 +530,51 @@ void chunk_utils::add_buckets(const std::vector<potree::node>& nodes, const std:
 
 }
 
-void chunk_utils::chunker::do_chunking(const std::vector<file_source>& sources, const std::string& target_dir, const vector3& min, const vector3& max, const std::shared_ptr<status>& state, const attributes& out_attrs, const std::shared_ptr<gen_utils::monitor>& monitor) {
- throw std::runtime_error("not implemented"); 
+void chunk_utils::chunker::do_chunking(const std::vector<file_source>& sources, const std::string& target_dir, const vector3& min, const vector3& max, const std::shared_ptr<status>& state, attributes& out_attrs, const std::shared_ptr<gen_utils::monitor>& monitor) {
+ gen_utils::profiler pr("chunker::do_chunking()");
+
+ int64_t tmp = state->pointsTotal / 20;
+ int grid_size = 512; // default
+  if (state->pointsTotal < 100'000'000) {
+    grid_size = 128;
+  }
+  else if (state->pointsTotal < 500'000'000) {
+    grid_size = 256;
+  }
+
+  state->currentPass = 1;
+
+  { // prepare/clean target directories
+    string dir = target_dir + "/chunks";
+    std::filesystem::create_directories(dir);
+
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+      std::filesystem::remove(entry);
+    }
+  }
+
+  las_utils::cell_point_counter pt_ctr(sources, min, max, grid_size, state, out_attrs, monitor);
+  auto grid = pt_ctr.count();
+
+  {
+    node_lookup_table lut = node_lookup_table::create(grid, grid_size);
+    state->currentPass = 2;
+    point_distributor pt_dtr;
+    pt_dtr.m_sources = sources;
+    pt_dtr.m_min = min;
+    pt_dtr.m_max = max;
+    pt_dtr.m_target_dir = target_dir;
+    pt_dtr.m_lut = lut;
+    pt_dtr.m_state = state;
+    pt_dtr.m_out_attributes = out_attrs;
+    pt_dtr.m_monitor = monitor;
+
+    // distribute points
+    pt_dtr.distribute();
+  }
+
+  std::string metadataPath = target_dir + "/chunks/metadata.json";
+  double cubeSize = (max - min).max();
+  vector3 size = { cubeSize, cubeSize, cubeSize };
+  write_metadata(metadataPath, min, min + cubeSize, out_attrs);
 }

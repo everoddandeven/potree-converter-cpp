@@ -9,7 +9,6 @@
 #include "string_utils.h"
 #include "file_utils.h"
 #include "attribute_utils.h"
-#include "task.h"
 #include <unordered_map>
 #include <execution>
 #include <filesystem>
@@ -129,302 +128,206 @@ private:
 	}
 };
 
-struct point_count_task : public task {
-	std::string path;
-	int64_t totalPoints = 0;
-	int64_t firstPoint;
-	int64_t firstByte;
-	int64_t numBytes;
-	int64_t numPoints;
-	int64_t bpp;
-	vector3 scale;
-	vector3 offset;
-	vector3 min;
-	vector3 max;
-};
+las_utils::cell_point_counter::cell_point_counter(
+	const std::vector<file_source>& sources, const vector3& min, const vector3& max,
+	int64_t grid_size, const std::shared_ptr<status>& state, attributes& out_attributes, const std::shared_ptr<gen_utils::monitor>& monitor
+) {
+	m_sources = sources;
+	m_min = min;
+	m_max = max;
+	m_grid_size = grid_size;		
+	std::vector<std::atomic_int32_t> grid(grid_size * grid_size * grid_size);
+	m_grid = std::move(grid);
+	m_out_attributes = out_attributes;
+	m_monitor = monitor;
+	m_state = state;
+	init_processor();
+	m_pool = std::make_unique<task_pool>(NUM_PROCESSORS, m_processor);
+}
 
-class cell_point_counter {
-public:
-	
-	cell_point_counter(
-		const std::vector<file_source>& sources, const vector3& min, const vector3& max,
-		int64_t grid_size, const std::shared_ptr<status>& state, attributes& out_attributes, gen_utils::monitor* monitor
-	) {
-		m_sources = sources;
-		m_min = min;
-		m_max = max;
-		m_grid_size = grid_size;		
-		std::vector<std::atomic_int32_t> grid(grid_size * grid_size * grid_size);
-		m_grid = std::move(grid);
-		m_out_attributes = out_attributes;
-		m_monitor = monitor;
-		m_state = state;
-		init_processor();
-		m_pool = std::make_unique<task_pool>(NUM_PROCESSORS, m_processor);
-	}
+std::vector<std::atomic_int32_t> las_utils::cell_point_counter::count() {
+	gen_utils::profiler pr("cell_point_counter::count()");
+	MINFO << "START COUNTING" << std::endl;
 
-	std::vector<std::atomic_int32_t> count() {
-		gen_utils::profiler pr("cell_point_counter::count()");
-		MINFO << "START COUNTING" << std::endl;
+	m_t_start = gen_utils::now();
+	assembly_sources();
 
-		m_t_start = gen_utils::now();
-		assembly_sources();
+	m_pool->wait();
+	m_pool->close();
 
-		m_pool->wait();
-		m_pool->close();
+	return std::move(m_grid);
+}
 
-		return std::move(m_grid);
-	}
+void las_utils::cell_point_counter::init_processor() {
+	m_processor = [this](std::shared_ptr<potree::task> t) {
+		auto task = std::static_pointer_cast<point_count_task>(t);
+		if (task == nullptr) {
+			MERROR << "cell_point_counter::count(): task is not point_count_task" << std::endl;
+			return;
+		}
 
-private:
-	std::vector<file_source> m_sources;
-	vector3 m_min;
-	vector3 m_max;
-	std::vector<std::atomic_int32_t> m_grid;
-	int64_t m_grid_size;
-	attributes m_out_attributes;
-	std::shared_ptr<status> m_state;
-	gen_utils::monitor* m_monitor;
-	std::unique_ptr<task_pool> m_pool;
-	task_processor m_processor;
-	double m_t_start = 0;
+		std::string path = task->path;
+		int64_t start = task->firstByte;
+		int64_t numBytes = task->numBytes;
+		int64_t numToRead = task->numPoints;
+		int64_t bpp = task->bpp;
+		vector3 min = task->min;
+		vector3 max = task->max;
 
-	void init_processor() {
-		m_processor = [this](std::shared_ptr<potree::task> t) {
-			auto task = std::static_pointer_cast<point_count_task>(t);
-			if (task == nullptr) {
-				MERROR << "cell_point_counter::count(): task is not point_count_task" << std::endl;
-				return;
-			}
+		MINFO << "counting " << std::filesystem::path(task->path).filename().string() 
+			<< ", first point: " << gen_utils::format_number(task->firstPoint)
+			<< ", num points: " << gen_utils::format_number(task->numPoints) << std::endl;
 
-			std::string path = task->path;
-			int64_t start = task->firstByte;
-			int64_t numBytes = task->numBytes;
-			int64_t numToRead = task->numPoints;
-			int64_t bpp = task->bpp;
-			vector3 min = task->min;
-			vector3 max = task->max;
+		thread_local unique_ptr<void, void(*)(void*)> buffer(nullptr, free);
+		thread_local int64_t bufferSize = -1;
 
-			MINFO << "counting " << std::filesystem::path(task->path).filename().string() 
-				<< ", first point: " << gen_utils::format_number(task->firstPoint)
-				<< ", num points: " << gen_utils::format_number(task->numPoints) << std::endl;
+		// sanity checks
+		if(numBytes < 0){
+			MERROR << "invalid malloc size: " + gen_utils::format_number(numBytes) << std::endl;
+		}
 
-			thread_local unique_ptr<void, void(*)(void*)> buffer(nullptr, free);
-			thread_local int64_t bufferSize = -1;
+		if (bufferSize < numBytes){
+			buffer.reset(malloc(numBytes));
+			bufferSize = numBytes;
+		}
 
-			// sanity checks
-			if(numBytes < 0){
-				MERROR << "invalid malloc size: " + gen_utils::format_number(numBytes) << std::endl;
-			}
+		laszip_POINTER reader;
+		{
+			laszip_BOOL is_compressed = string_utils::iends_with(path, ".laz") ? 1 : 0;
+			laszip_BOOL request_reader = 1;
 
-			if (bufferSize < numBytes){
-				buffer.reset(malloc(numBytes));
-				bufferSize = numBytes;
-			}
+			laszip_create(&reader);
+			laszip_request_compatibility_mode(reader, request_reader);
+			laszip_open_reader(reader, path.c_str(), &is_compressed);
+			laszip_seek_point(reader, task->firstPoint);
+		}
 
-			laszip_POINTER reader;
+		double cubeSize = (max - min).max();
+		vector3 size = { cubeSize, cubeSize, cubeSize };
+		max = min + cubeSize;
+
+		double d_grid_size = double(this->m_grid_size);
+
+		double coordinates[3];
+
+		auto posScale = this->m_out_attributes.posScale;
+		auto posOffset = this->m_out_attributes.posOffset;
+
+		for (int i = 0; i < numToRead; i++) {
+			int64_t pointOffset = i * bpp;
+
+			laszip_read_point(reader);
+			laszip_get_coordinates(reader, coordinates);
+
 			{
-				laszip_BOOL is_compressed = string_utils::iends_with(path, ".laz") ? 1 : 0;
-				laszip_BOOL request_reader = 1;
+				// transfer las integer coordinates to new scale/offset/box values
+				double x = coordinates[0];
+				double y = coordinates[1];
+				double z = coordinates[2];
 
-				laszip_create(&reader);
-				laszip_request_compatibility_mode(reader, request_reader);
-				laszip_open_reader(reader, path.c_str(), &is_compressed);
-				laszip_seek_point(reader, task->firstPoint);
-			}
+				int32_t X = int32_t((x - posOffset.x) / posScale.x);
+				int32_t Y = int32_t((y - posOffset.y) / posScale.y);
+				int32_t Z = int32_t((z - posOffset.z) / posScale.z);
 
-			double cubeSize = (max - min).max();
-			vector3 size = { cubeSize, cubeSize, cubeSize };
-			max = min + cubeSize;
+				double ux = (double(X) * posScale.x + posOffset.x - min.x) / size.x;
+				double uy = (double(Y) * posScale.y + posOffset.y - min.y) / size.y;
+				double uz = (double(Z) * posScale.z + posOffset.z - min.z) / size.z;
 
-			double d_grid_size = double(this->m_grid_size);
+				bool inBox = ux >= 0.0 && uy >= 0.0 && uz >= 0.0;
+				inBox = inBox && ux <= 1.0 && uy <= 1.0 && uz <= 1.0;
 
-			double coordinates[3];
+				if (!inBox) {
+					MERROR << "encountered point outside bounding box." << std::endl
+					<< "box.min: " << min.to_string() << std::endl
+					<< "box.max: " << max.to_string() << std::endl
+					<< "point: " << vector3(x, y, z).to_string() << std::endl
+					<< "file: " << path << std::endl
+					<< "PotreeConverter requires a valid bounding box to operate." << std::endl
+					<< "Please try to repair the bounding box, e.g. using lasinfo with the -repair_bb argument." << std::endl;
 
-			auto posScale = this->m_out_attributes.posScale;
-			auto posOffset = this->m_out_attributes.posOffset;
-
-			for (int i = 0; i < numToRead; i++) {
-				int64_t pointOffset = i * bpp;
-
-				laszip_read_point(reader);
-				laszip_get_coordinates(reader, coordinates);
-
-				{
-					// transfer las integer coordinates to new scale/offset/box values
-					double x = coordinates[0];
-					double y = coordinates[1];
-					double z = coordinates[2];
-
-					int32_t X = int32_t((x - posOffset.x) / posScale.x);
-					int32_t Y = int32_t((y - posOffset.y) / posScale.y);
-					int32_t Z = int32_t((z - posOffset.z) / posScale.z);
-
-					double ux = (double(X) * posScale.x + posOffset.x - min.x) / size.x;
-					double uy = (double(Y) * posScale.y + posOffset.y - min.y) / size.y;
-					double uz = (double(Z) * posScale.z + posOffset.z - min.z) / size.z;
-
-					bool inBox = ux >= 0.0 && uy >= 0.0 && uz >= 0.0;
-					inBox = inBox && ux <= 1.0 && uy <= 1.0 && uz <= 1.0;
-
-					if (!inBox) {
-						MERROR << "encountered point outside bounding box." << std::endl
-						<< "box.min: " << min.to_string() << std::endl
-						<< "box.max: " << max.to_string() << std::endl
-						<< "point: " << vector3(x, y, z).to_string() << std::endl
-						<< "file: " << path << std::endl
-						<< "PotreeConverter requires a valid bounding box to operate." << std::endl
-						<< "Please try to repair the bounding box, e.g. using lasinfo with the -repair_bb argument." << std::endl;
-
-						throw std::runtime_error("encountered point outside bounding box");
-					}
-
-					int64_t ix = int64_t(std::min(d_grid_size * ux, d_grid_size - 1.0));
-					int64_t iy = int64_t(std::min(d_grid_size * uy, d_grid_size - 1.0));
-					int64_t iz = int64_t(std::min(d_grid_size * uz, d_grid_size - 1.0));
-
-					int64_t index = ix + iy * m_grid_size + iz * m_grid_size * m_grid_size;
-
-					m_grid[index]++;
+					throw std::runtime_error("encountered point outside bounding box");
 				}
 
+				int64_t ix = int64_t(std::min(d_grid_size * ux, d_grid_size - 1.0));
+				int64_t iy = int64_t(std::min(d_grid_size * uy, d_grid_size - 1.0));
+				int64_t iz = int64_t(std::min(d_grid_size * uz, d_grid_size - 1.0));
+
+				int64_t index = ix + iy * m_grid_size + iz * m_grid_size * m_grid_size;
+
+				m_grid[index]++;
 			}
 
-			laszip_close_reader(reader);
-			laszip_destroy(reader);
+		}
 
-			static int64_t pointsProcessed = 0;
-			pointsProcessed += task->numPoints;
+		laszip_close_reader(reader);
+		laszip_destroy(reader);
 
-			m_state->name = "COUNTING";
-			m_state->pointsProcessed = pointsProcessed;
-			m_state->duration = gen_utils::now() - m_t_start;
-		};
-	}
+		static int64_t pointsProcessed = 0;
+		pointsProcessed += task->numPoints;
 
-	void assembly_sources() {
-		gen_utils::profiler pr("cell_point_counter::assembly_sources()");
-		for (const auto& source : m_sources) {
-			laszip_POINTER laszip_reader;
-			laszip_header* header;
+		m_state->name = "COUNTING";
+		m_state->pointsProcessed = pointsProcessed;
+		m_state->duration = gen_utils::now() - m_t_start;
+	};
+}
+
+void las_utils::cell_point_counter::assembly_sources() {
+	gen_utils::profiler pr("cell_point_counter::assembly_sources()");
+	for (const auto& source : m_sources) {
+		laszip_POINTER laszip_reader;
+		laszip_header* header;
+		
+		{
+			laszip_create(&laszip_reader);
+			laszip_BOOL request_reader = 1;
+			laszip_BOOL is_compressed = string_utils::iends_with(source.path, ".laz") ? 1 : 0;
+			laszip_request_compatibility_mode(laszip_reader, request_reader);
+			laszip_open_reader(laszip_reader, source.path.c_str(), &is_compressed);
+			laszip_get_header_pointer(laszip_reader, &header);
+		}
+		
+		int64_t bpp = header->point_data_record_length;
+		int64_t numPoints = std::max(uint64_t(header->number_of_point_records), header->extended_number_of_point_records);
+		int64_t pointsLeft = numPoints;
+		int64_t batchSize = 1'000'000;
+		int64_t numRead = 0;
+
+		while (pointsLeft > 0) {
+
+			int64_t numToRead;
+			if (pointsLeft < batchSize) {
+				numToRead = pointsLeft;
+				pointsLeft = 0;
+			} 
+			else {
+				numToRead = batchSize;
+				pointsLeft = pointsLeft - batchSize;
+			}
 			
-			{
-				laszip_create(&laszip_reader);
-				laszip_BOOL request_reader = 1;
-				laszip_BOOL is_compressed = string_utils::iends_with(source.path, ".laz") ? 1 : 0;
-				laszip_request_compatibility_mode(laszip_reader, request_reader);
-				laszip_open_reader(laszip_reader, source.path.c_str(), &is_compressed);
-				laszip_get_header_pointer(laszip_reader, &header);
-			}
-			
-			int64_t bpp = header->point_data_record_length;
-			int64_t numPoints = std::max(uint64_t(header->number_of_point_records), header->extended_number_of_point_records);
-			int64_t pointsLeft = numPoints;
-			int64_t batchSize = 1'000'000;
-			int64_t numRead = 0;
+			int64_t firstByte = header->offset_to_point_data + numRead * bpp;
+			int64_t numBytes = numToRead * bpp;
 
-			while (pointsLeft > 0) {
+			auto task = std::make_shared<point_count_task>();
+			task->path = source.path;
+			task->totalPoints = numPoints;
+			task->firstPoint = numRead;
+			task->firstByte = firstByte;
+			task->numBytes = numBytes;
+			task->numPoints = numToRead;
+			task->bpp = header->point_data_record_length; 
+			//task->scale = { header->x_scale_factor, header->y_scale_factor, header->z_scale_factor };
+			//task->offset = { header->x_offset, header->y_offset, header->z_offset };
+			task->min = m_min;
+			task->max = m_max;
 
-				int64_t numToRead;
-				if (pointsLeft < batchSize) {
-					numToRead = pointsLeft;
-					pointsLeft = 0;
-				} 
-				else {
-					numToRead = batchSize;
-					pointsLeft = pointsLeft - batchSize;
-				}
-				
-				int64_t firstByte = header->offset_to_point_data + numRead * bpp;
-				int64_t numBytes = numToRead * bpp;
+			m_pool->add(task);
 
-				auto task = std::make_shared<point_count_task>();
-				task->path = source.path;
-				task->totalPoints = numPoints;
-				task->firstPoint = numRead;
-				task->firstByte = firstByte;
-				task->numBytes = numBytes;
-				task->numPoints = numToRead;
-				task->bpp = header->point_data_record_length; 
-				//task->scale = { header->x_scale_factor, header->y_scale_factor, header->z_scale_factor };
-				//task->offset = { header->x_offset, header->y_offset, header->z_offset };
-				task->min = m_min;
-				task->max = m_max;
-
-				m_pool->add(task);
-
-				numRead += batchSize;
-			}
-
-			laszip_close_reader(laszip_reader);
-			laszip_destroy(laszip_reader);
+			numRead += batchSize;
 		}
+
+		laszip_close_reader(laszip_reader);
+		laszip_destroy(laszip_reader);
 	}
-};
-
-void write_metadata(const std::string& path, const vector3& min, const vector3& max, const attributes& attrs) {
-	json js;
-
-	js["min"] = { min.x, min.y, min.z };
-	js["max"] = { max.x, max.y, max.z };
-
-	js["attributes"] = {};
-	for (const auto& attribute : attrs.list) {
-
-		json js_attr;
-		js_attr["name"] = attribute.name;
-		js_attr["size"] = attribute.size;
-		js_attr["numElements"] = attribute.numElements;
-		js_attr["elementSize"] = attribute.elementSize;
-		js_attr["description"] = attribute.description;
-		js_attr["type"] = attribute_utils::get_name(attribute.type);
-
-		if (attribute.numElements == 1) {
-			js_attr["min"] = std::vector<double>{ attribute.min.x };
-			js_attr["max"] = std::vector<double>{ attribute.max.x };
-			js_attr["scale"] = std::vector<double>{ attribute.scale.x };
-			js_attr["offset"] = std::vector<double>{ attribute.offset.x };
-		} else if (attribute.numElements == 2) {
-			js_attr["min"] = std::vector<double>{ attribute.min.x, attribute.min.y};
-			js_attr["max"] = std::vector<double>{ attribute.max.x, attribute.max.y};
-			js_attr["scale"] = std::vector<double>{ attribute.scale.x, attribute.scale.y};
-			js_attr["offset"] = std::vector<double>{ attribute.offset.x, attribute.offset.y};
-		} else if (attribute.numElements == 3) {
-			js_attr["min"] = std::vector<double>{ attribute.min.x, attribute.min.y, attribute.min.z };
-			js_attr["max"] = std::vector<double>{ attribute.max.x, attribute.max.y, attribute.max.z };
-			js_attr["scale"] = std::vector<double>{ attribute.scale.x, attribute.scale.y, attribute.scale.z };
-			js_attr["offset"] = std::vector<double>{ attribute.offset.x, attribute.offset.y, attribute.offset.z };
-		}
-
-		bool emptyHistogram = true;
-		for(int i = 0; i < attribute.histogram.size(); i++){
-			if(attribute.histogram[i] != 0){
-				emptyHistogram = false;
-			}
-		}
-
-		if(attribute.size == 1 && !emptyHistogram){
-			json jsHistogram = attribute.histogram;
-
-			js_attr["histogram"] = jsHistogram;
-		}
-
-		js["attributes"].push_back(js_attr);
-	}
-
-	js["scale"] = std::vector<double>({
-		attrs.posScale.x, 
-		attrs.posScale.y, 
-		attrs.posScale.z});
-
-	js["offset"] = std::vector<double>({
-		attrs.posOffset.x,
-		attrs.posOffset.y,
-		attrs.posOffset.z });
-
-	string content = js.dump(4);
-
-	file_utils::write_text(path, content);
 }
 
 std::vector<attribute> las_utils::parse_extra_attributes(const las_header& header) {
