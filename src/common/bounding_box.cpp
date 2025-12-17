@@ -1,4 +1,5 @@
 #include "bounding_box.h"
+#include "utils/json_utils.h"
 
 using namespace potree;
 
@@ -62,4 +63,14 @@ bounding_box bounding_box::parse(const json& metadata) {
 	};
 
 	return bbox;
+}
+
+std::string bounding_box::to_json() const {
+	std::stringstream ss;
+	ss << "{" << std::endl;
+	ss << json_utils::tab(2) << json_utils::str_value("min") << ": " << min.to_json() << ", " << std::endl;
+	ss << json_utils::tab(2) << json_utils::str_value("max") << ": " << max.to_json() << std::endl;
+	ss << json_utils::tab(1) << "}";
+
+	return ss.str();
 }

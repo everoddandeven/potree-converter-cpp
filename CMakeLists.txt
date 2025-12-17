@@ -58,9 +58,10 @@ set(HEADER_FILES
   ./src/sampler/sampler.h
   ./src/sampler/sampler_poisson.h
   ./src/sampler/sampler_random.h
+  ./src/utils/attribute_utils.h
+  ./src/utils/brotli_utils.h
   ./src/utils/gen_utils.h
   ./src/utils/file_utils.h
-  ./src/utils/attribute_utils.h
   ./src/utils/chunk_utils.h
   ./src/utils/concurrent_writer.h
   ./src/utils/string_utils.h
@@ -82,6 +83,7 @@ set(SRC_FILES
   ./src/sampler/sampler_poisson.cpp
   ./src/sampler/sampler_random.cpp
   ./src/utils/attribute_utils.cpp
+  ./src/utils/brotli_utils.cpp
   ./src/utils/chunk_utils.cpp
   ./src/utils/concurrent_writer.cpp
   ./src/utils/file_utils.cpp

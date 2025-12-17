@@ -1,11 +1,145 @@
 #include "hierarchy.h"
 #include "utils/string_utils.h"
 #include "utils/file_utils.h"
+#include "utils/brotli_utils.h"
+#include "utils/task.h"
 #include "buffer.h"
-#include <fstream>
 #include <filesystem>
+#include <deque>
+#include <condition_variable>
+#include <chrono>
 
 using namespace potree;
+using namespace std::chrono_literals;
+
+struct load_task : public task {
+  std::shared_ptr<potree::node> node;
+  int64_t offset;
+  int64_t size;
+
+  load_task(const std::shared_ptr<potree::node>& node, int64_t offset, int64_t size) {
+    this->node = node;
+    this->offset = offset;
+    this->size = size;
+  }
+};
+
+void check_error(const std::shared_ptr<potree::node>& node, int64_t size) {
+  if (size >= 0) return;
+
+  MERROR << "invalid call to malloc(" << std::to_string(size) << ")" << std::endl
+  << "in function writeAndUnload()" << std::endl
+  << "node: " << node->name << std::endl
+  << "#points: " << node->numPoints << std::endl
+  << "min: " << node->min.to_string() << std::endl
+  << "max: " << node->max.to_string() << std::endl;
+}
+
+hierarchy_writer::hierarchy_writer(const std::shared_ptr<hierarchy_indexer>& indexer) {
+  m_indexer = indexer;
+  std::string path = indexer->get_target_dir() + "/octree.bin";
+  m_fs_octree.open(path, std::ios::out | std::ios::binary);
+  launch();
+}
+
+void hierarchy_writer::write_and_unload(const std::shared_ptr<potree::node>& node) {
+  if(node->numPoints == 0) return;
+
+  auto attributes = m_indexer->m_attributes;
+  std::string encoding = m_indexer->m_options.encoding;
+  std::shared_ptr<potree::buffer> sourceBuffer;
+
+  if (encoding == "BROTLI") {
+    sourceBuffer = brotli_utils::compress(node, attributes);
+  } 
+  else {
+    sourceBuffer = node->points;
+  }
+  
+  int64_t byteSize = sourceBuffer->size;
+  node->byteSize = byteSize;
+  std::shared_ptr<potree::buffer> buffer = nullptr;
+  int64_t targetOffset = 0;
+  {
+    std::lock_guard<std::mutex> lock(m_mtx);
+
+    int64_t byteOffset = m_indexer->m_byte_offset.fetch_add(byteSize);
+    node->byteOffset = byteOffset;
+
+    if (m_active_buffer == nullptr) {
+      check_error(node, m_capacity);
+      m_active_buffer = std::make_shared<potree::buffer>(m_capacity);
+    } 
+    else if (m_active_buffer->pos + byteSize > m_capacity) {
+      m_backlog.push_back(m_active_buffer);
+      m_capacity = std::max(m_capacity, byteSize);
+      check_error(node, m_capacity);
+      m_active_buffer = std::make_shared<potree::buffer>(m_capacity);
+    }
+
+    buffer = m_active_buffer;
+    targetOffset = m_active_buffer->pos;
+    m_active_buffer->pos += byteSize;
+  }	
+
+  memcpy(buffer->data_char + targetOffset, sourceBuffer->data, byteSize);
+  node->points = nullptr;
+}
+
+void hierarchy_writer::close_and_wait() {
+  if (m_closed) return;
+
+  std::unique_lock<std::mutex> lock(m_mtx);
+
+  if (m_active_buffer != nullptr) {
+    m_backlog.push_back(m_active_buffer);
+  }
+
+  m_close_requested = true;
+  m_close_cv.wait(lock);
+  m_fs_octree.close();
+}
+
+int64_t hierarchy_writer::get_backlog_size_mb() {
+  std::lock_guard<std::mutex> lock(m_backlog_mtx);
+  int64_t backlogBytes = m_backlog.size() * m_capacity;
+  int64_t backlogMB = backlogBytes / (1024 * 1024);
+  return backlogMB;
+}
+
+void hierarchy_writer::launch() {
+  std::thread([&]() {
+    for (;;) {
+      std::shared_ptr<potree::buffer> buffer = nullptr;
+
+      {
+        std::lock_guard<std::mutex> lock(m_mtx);
+
+        if (m_backlog.size() > 0) {
+          buffer = m_backlog.front();
+          m_backlog.pop_front();
+        } 
+        else if (m_backlog.size() == 0 && m_close_requested) {
+          // DONE! No more work and close requested. quit thread.
+          m_close_cv.notify_one();
+          break;
+        }
+      }
+
+      if (buffer != nullptr) {
+        int64_t numBytes = buffer->pos;
+        m_indexer->m_bytes_written += numBytes;
+        m_indexer->m_bytes_to_write -= numBytes;
+        m_fs_octree.write(buffer->data_char, numBytes);
+        m_indexer->m_bytes_in_memory -= numBytes;
+      } 
+      else {
+        std::this_thread::sleep_for(10ms);
+      }
+    }
+  }).detach();
+}
+
 
 hierarchy_builder::hierarchy_builder(const std::string& path, int step_size) {
   m_path = path;
@@ -366,4 +500,294 @@ void hierarchy_flusher::write(std::vector<potree::node>& nodes, int step_size) {
 
     m_chunks[key] += groupedNodes.size();
   }
+}
+
+hierarchy_indexer::hierarchy_indexer(const std::string& target_dir) {
+  m_target_dir = target_dir;
+  m_writer = std::make_unique<hierarchy_writer>(shared_from_this());
+  m_flusher = std::make_unique<hierarchy_flusher>(target_dir + "/.hierarchyChunks");
+  std::string cr_file = target_dir + "/tmpChunkRoots.bin";
+  m_fs_chunk_roots.open(cr_file, std::ios::out | std::ios::binary);
+}
+
+hierarchy_indexer::~hierarchy_indexer() {
+  m_fs_chunk_roots.close();
+}
+
+void hierarchy_indexer::wait_for_backlog_below(int max_mb) {
+  while (true) {
+    if (m_writer->get_backlog_size_mb() > max_mb) {
+      std::this_thread::sleep_for(10ms);
+      continue;
+    } 
+    
+    break;
+  }
+}
+
+void hierarchy_indexer::wait_for_memory_below(int max_mb) {
+  while (true) {
+    auto memoryData = gen_utils::get_memory_data();
+    auto usedMemoryMB = memoryData.virtual_usedByProcess / (1024 * 1024);
+
+    if (usedMemoryMB > max_mb) {
+      std::this_thread::sleep_for(10ms);
+      continue;
+    }
+
+    break;
+  }
+}
+
+// create vector containing start node and all descendants up to and including levels deeper
+// e.g. start 0 and levels 5 -> all nodes from level 0 to inclusive 5.
+potree::node hierarchy_indexer::gather_chunks(const std::shared_ptr<potree::node>& start, int levels) {
+	int64_t startLevel = start->name.size() - 1;
+
+	potree::node chunk;
+	chunk.name = start->name;
+
+	std::vector<std::shared_ptr<potree::node>> stack = { start };
+	while (!stack.empty()) {
+		auto& node = stack.back();
+		stack.pop_back();
+
+		chunk.children.push_back(node);
+
+		int64_t childLevel = node->name.size();
+		if (childLevel <= startLevel + levels) {
+
+			for (auto& child : node->children) {
+				if (child == nullptr) {
+					continue;
+				}
+
+				stack.push_back(child);
+			}
+
+		}
+	}
+
+	return chunk;
+}
+
+std::vector<potree::node> hierarchy_indexer::gather_hierarchy_chunks(const std::shared_ptr<potree::node>& root, int step_size) {
+  std::vector<potree::node> hierarchyChunks;
+	std::vector<std::shared_ptr<potree::node>> stack = { root };
+	while (!stack.empty()) {
+		auto& chunkRoot = stack.back();
+		stack.pop_back();
+		auto chunk = gather_chunks(chunkRoot, step_size);
+
+		for (auto& node : chunk.children) {
+			bool isProxy = node->get_level() == chunkRoot->get_level() + step_size;
+
+			if (isProxy) {
+				stack.push_back(node);
+			}
+		}
+
+		hierarchyChunks.push_back(chunk);
+	}
+
+	return hierarchyChunks;
+}
+
+hierarchy hierarchy_indexer::create_hiearchy(const std::string& path) {
+	int step_size = hierarchy::DEFAULT_STEP_SIZE;
+  // type + childMask + numPoints + offset + size
+  constexpr int bytesPerNode = 1 + 1 + 4 + 8 + 8;
+
+	auto chunkSize = [](potree::node& chunk) {
+		return chunk.children.size() * bytesPerNode;
+	};
+  
+	auto chunks = gather_hierarchy_chunks(m_root, step_size);
+
+	std::unordered_map<std::string, int> chunkPointers;
+	std::vector<int64_t> chunkByteOffsets(chunks.size(), 0);
+	int64_t hierarchyBufferSize = 0;
+	for (size_t i = 0; i < chunks.size(); i++) {
+		auto& chunk = chunks[i];
+		chunkPointers[chunk.name] = i;
+
+		node::sort_by_breadth(chunk.children);
+
+		if (i >= 1) {
+			chunkByteOffsets[i] = chunkByteOffsets[i - 1] + chunkSize(chunks[i - 1]);
+		}
+
+		hierarchyBufferSize += chunkSize(chunk);
+	}
+
+	std::vector<uint8_t> hierarchyBuffer(hierarchyBufferSize);
+
+	int offset = 0;
+	for (int i = 0; i < chunks.size(); i++) {
+		auto& chunk = chunks[i];
+		auto chunkLevel = chunk.name.size() - 1;
+
+		for (auto& node : chunk.children) {
+			bool isProxy = node->get_level() == chunkLevel + step_size;
+
+			uint8_t childMask = node->get_child_mask();
+			uint64_t targetOffset = 0;
+			uint64_t targetSize = 0;
+			uint32_t numPoints = uint32_t(node->numPoints);
+			node_type ntype = node->isLeaf() ? node_type::LEAF : node_type::NORMAL;
+
+      if (isProxy) {
+				int targetChunkIndex = chunkPointers[node->name];
+				auto targetChunk = chunks[targetChunkIndex];
+				ntype = node_type::PROXY;
+				targetOffset = chunkByteOffsets[targetChunkIndex];
+				targetSize = chunkSize(targetChunk);
+			} else {
+				targetOffset = node->byteOffset;
+				targetSize = node->byteSize;
+			}
+
+      uint8_t type = static_cast<uint8_t>(ntype);
+
+			memcpy(hierarchyBuffer.data() + offset + 0, &type, 1);
+			memcpy(hierarchyBuffer.data() + offset + 1, &childMask, 1);
+			memcpy(hierarchyBuffer.data() + offset + 2, &numPoints, 4);
+			memcpy(hierarchyBuffer.data() + offset + 6, &targetOffset, 8);
+			memcpy(hierarchyBuffer.data() + offset + 14, &targetSize, 8);
+
+			offset += bytesPerNode;
+		}
+
+	}
+
+	hierarchy h;
+	h.m_step_size = step_size;
+	h.m_buffer = hierarchyBuffer;
+	h.m_first_chunk_size = chunks[0].children.size() * bytesPerNode;
+
+	return h; 
+}
+
+void hierarchy_indexer::flush(const std::shared_ptr<potree::node>& chunk_root) {
+  std::lock_guard<std::mutex> lock(m_root_mtx);
+
+  static int64_t offset = 0;
+  int64_t size = m_root->points->size;
+  m_fs_chunk_roots.write(m_root->points->data_char, size);
+
+  node_flush_info fcr;
+  fcr.m_node = m_root;
+  fcr.offset = offset;
+  fcr.size = size;
+
+  m_root->points = nullptr;
+  m_flushed_chunk_roots.push_back(fcr);
+  offset += size;
+}
+
+void hierarchy_indexer::reload() {
+  gen_utils::profiler pr("hierarchy_indexer::reload()");
+
+  m_fs_chunk_roots.close();
+
+  std::string targetDir = m_target_dir;
+  task_pool pool(16, [targetDir](std::shared_ptr<task> t) {
+    auto task = std::static_pointer_cast<load_task>(t);
+    std::string octreePath = targetDir + "/tmpChunkRoots.bin";
+    std::shared_ptr<potree::node> node = task->node;
+    int64_t start = task->offset;
+    int64_t size = task->size;
+
+    auto buffer = std::make_shared<potree::buffer>(size);
+    file_utils::read_binary(octreePath, start, size, buffer->data);
+
+    node->points = buffer;
+  });
+
+  for (auto& fcr : m_flushed_chunk_roots) {
+    auto task = std::make_shared<load_task>(fcr.m_node, fcr.offset, fcr.size);
+    pool.add(task);
+  }
+
+  pool.close();
+}
+
+std::vector<chunk_node> hierarchy_indexer::process_chunk_roots() {
+  std::unordered_map<std::string, std::shared_ptr<chunk_node>> nodesMap;
+  std::vector<std::shared_ptr<chunk_node>> nodesList;
+
+  // create/copy nodes
+  m_root->traverse([&nodesMap, &nodesList](const std::shared_ptr<potree::node>& node, int level) {
+    auto crnode = std::make_shared<chunk_node>();
+    crnode->name = node->name;
+    crnode->m_node = node;
+    crnode->children.resize(node->children.size());
+
+    nodesList.push_back(crnode);
+    nodesMap[crnode->name] = crnode;
+  });
+
+  // establish hierarchy
+  for (auto& crnode : nodesList) {
+    std::string parentName = crnode->name.substr(0, crnode->name.size() - 1);
+
+    if (parentName != "") {
+      auto parent = nodesMap[parentName];
+      int index = crnode->name.at(crnode->name.size() - 1) - '0';
+
+      parent->children[index] = crnode;
+    }
+  }
+
+  // mark/flag/insert flushed chunk roots
+  for(auto& fcr : m_flushed_chunk_roots){
+    auto& node = nodesMap[fcr.m_node->name];
+    node->m_flushed_roots.push_back(fcr);
+    node->numPoints += fcr.m_node->numPoints;
+  }
+
+  // recursively merge leaves if sum(points) < threshold
+  auto cr_root = nodesMap["r"];
+  static int64_t threshold = 5'000'000;
+
+  cr_root->traversePost([](const std::shared_ptr<potree::node>& n) {
+    auto node = std::static_pointer_cast<chunk_node>(n);
+    if (node->isLeaf()) {
+      return;
+    }
+
+    int numPoints = 0;
+    for(auto child : node->children){
+      if(!child) continue;
+      numPoints += child->numPoints;
+    }
+
+    node->numPoints = numPoints;
+
+    if (node->numPoints < threshold) {
+      // merge children into this node
+      for (auto& c : node->children) {
+        auto child = std::static_pointer_cast<chunk_node>(c);
+        if(!child) continue;
+
+        node->m_flushed_roots.insert(node->m_flushed_roots.end(), child->m_flushed_roots.begin(), child->m_flushed_roots.end());
+      }
+
+      node->children.clear();
+    }
+    
+  });
+
+  std::vector<chunk_node> tasks;
+  auto on_traverse = [&tasks](const std::shared_ptr<potree::node>& n, int level) {
+    auto node = std::static_pointer_cast<chunk_node>(n);
+    if (node->m_flushed_roots.size() > 0) {
+      chunk_node crnode = *node;
+      tasks.push_back(crnode);
+    }
+  };
+
+  cr_root->traverse(on_traverse);
+
+  return tasks;
 }

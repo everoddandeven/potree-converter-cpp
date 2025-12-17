@@ -15,6 +15,7 @@ namespace potree {
     bounding_box();
     bounding_box(const vector3& min, const vector3& max);
     bounding_box child_of(int index) const;
+    std::string to_json() const;
 
     static bounding_box child_of(const vector3& min, const vector3& max, int index);
     static bounding_box parse(const json& metadata);

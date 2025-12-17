@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <string>
 #include <iomanip>
+#include "utils/gen_utils.h"
 #include "nlohmann/json.hpp"
 
 using namespace nlohmann;
@@ -76,12 +77,16 @@ namespace potree {
 			return vector3(x * scalar, y * scalar, z * scalar);
 		}
 
-		std::string to_string() {
+		std::string to_string() const {
 			auto digits = std::numeric_limits<double>::max_digits10;
 			std::stringstream ss;
 			ss << std::setprecision(digits);
 			ss << x << ", " << y << ", " << z;
 			return ss.str();
+		}
+		
+		std::string to_json() const {
+			return "[" + gen_utils::to_digits(x) + ", " + gen_utils::to_digits(y) + ", " + gen_utils::to_digits(z) + "]";
 		}
 
 		static vector3 parse_min(const json& bounding_box_json);

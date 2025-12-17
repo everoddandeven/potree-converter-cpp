@@ -20,7 +20,7 @@ namespace potree {
     PROXY,
   };
 
-  struct node {
+  struct node : public std::enable_shared_from_this<node> {
   public:
     std::shared_ptr<node> parent;
     std::vector<std::shared_ptr<node>> children;
@@ -55,15 +55,19 @@ namespace potree {
 
     int64_t get_level() const { return name.size() - 1; }
     vector3 get_center() const { return (min + max) * 0.5; }
+    uint8_t get_child_mask() const;
     bool compare_distance_to_center(const point& a, const point& b) const;
     void sort_by_distance_to_center(std::vector<point>& points) const;
     bool isLeaf() const;
     void addDescendant(std::shared_ptr<node> descendant);
-    void traverse(std::function<void(node*, int)> callback, int level = 0);
-    void traversePost(std::function<void(node*)> callback);
+    void traverse(std::function<void(const std::shared_ptr<node>&, int)> callback, int level = 0);
+    void traversePost(std::function<void(const std::shared_ptr<node>&)> callback);
     node* find(std::string name);
     std::vector<int64_t_point> get_points(const attributes& attrs) const;
 
+    static bool compare_breadth(const potree::node& a, const potree::node& b);
+    static bool compare_breadth(const std::shared_ptr<potree::node>& a, const std::shared_ptr<potree::node>& b);
+    static void sort_by_breadth(std::vector<std::shared_ptr<potree::node>>& nodes);
     static attributes parse_attributes(const json& metadata);
     static std::shared_ptr<potree::node> load_hierarchy(const std::string& path, const json& metadata);
   };
@@ -77,5 +81,20 @@ namespace potree {
     std::vector<std::shared_ptr<node>> chunks;
     std::unordered_map<std::string, std::shared_ptr<node>> node_map;
     std::unordered_map<std::string, std::shared_ptr<node>> chunk_map;
+  };
+
+  struct node_flush_info {
+    std::shared_ptr<node> m_node;
+    int64_t offset = 0;
+    int64_t size = 0;
+  };
+
+  struct chunk_node : public node {
+    std::string m_name;
+    std::shared_ptr<node> m_node;
+    std::vector<node_flush_info> m_flushed_roots;
+    int m_num_points = 0;
+
+    chunk_node();
   };
 }

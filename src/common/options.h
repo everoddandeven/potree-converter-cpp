@@ -5,7 +5,7 @@
 
 
 namespace potree {
-  struct Options {
+  struct options {
     std::vector<std::string> source;
     std::string encoding = "DEFAULT"; // "BROTLI", "UNCOMPRESSED"
     std::string outdir = "";

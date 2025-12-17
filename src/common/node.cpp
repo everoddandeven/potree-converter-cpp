@@ -53,26 +53,25 @@ void node::addDescendant(std::shared_ptr<node> descendant) {
   current->children[index] = descendant;
 }
 
-void node::traverse(std::function<void(node*, int)> callback, int level)
-{
-  callback(this, level);
+void node::traverse(std::function<void(const std::shared_ptr<node>&, int)> callback, int level) {
+  callback(shared_from_this(), level);
 
-  for (auto child : children) {
+  for (auto& child : children) {
     if (child != nullptr) {
       child->traverse(callback, level + 1);
     }
   }
 }
 
-void node::traversePost(std::function<void(node*)> callback) {
-  for (auto child : children) {
+void node::traversePost(std::function<void(const std::shared_ptr<node>&)> callback) {
+  for (auto& child : children) {
 
     if (child != nullptr) {
       child->traversePost(callback);
     }
   }
 
-  callback(this);
+  callback(shared_from_this());
 }
 
 node* node::find(std::string name) {
@@ -186,6 +185,20 @@ std::vector<int64_t_point> node::get_points(const attributes& attrs) const {
   return pts;
 }
 
+uint8_t node::get_child_mask() const {
+  uint8_t mask = 0;
+
+  for (int64_t i = 0; i < 8; i++) {
+    auto& child = children[i];
+
+    if (child != nullptr) {
+      mask = mask | (1 << i);
+    }
+  }
+
+  return mask;
+}
+
 bool node::compare_distance_to_center(const point& a, const point& b) const {
   auto center = get_center();
   auto ax = a.x - center.x;
@@ -202,9 +215,33 @@ bool node::compare_distance_to_center(const point& a, const point& b) const {
   return add < bdd;
 }
 
+bool node::compare_breadth(const potree::node& a, const potree::node& b) {
+  if (a.name.size() != b.name.size()) {
+    return a.name.size() < b.name.size();
+  }
+
+  return a.name < b.name;
+}
+
+bool node::compare_breadth(const std::shared_ptr<potree::node>& a, const std::shared_ptr<potree::node>& b) {
+  if (a == nullptr) return false;
+  if (b == nullptr) return false;
+  return node::compare_breadth(*a, *b);
+}
+
+void node::sort_by_breadth(std::vector<std::shared_ptr<potree::node>>& nodes) {
+  std::sort(nodes.begin(), nodes.end(), [](const std::shared_ptr<potree::node>& a, const std::shared_ptr<potree::node>& b) {
+    return node::compare_breadth(a, b);
+  });
+}
+
 void node::sort_by_distance_to_center(std::vector<point>& points) const {
   auto parallel = std::execution::par_unseq;
   std::sort(parallel, points.begin(), points.end(), [this](const point& a, const point& b) -> bool {
     return compare_distance_to_center(a, b);
   });
+}
+
+chunk_node::chunk_node() {
+  children.resize(8, nullptr);
 }

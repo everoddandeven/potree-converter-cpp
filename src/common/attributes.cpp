@@ -1,9 +1,11 @@
 #include "attributes.h"
 #include "utils/gen_utils.h"
 #include "utils/string_utils.h"
-
+#include "utils/json_utils.h"
+#include "utils/attribute_utils.h"
 
 using namespace potree;
+
 
 std::string attributes::to_string() const {
   std::stringstream ss;
@@ -29,9 +31,71 @@ std::string attributes::to_string() const {
   }
   ss << std::string(ct, '=') <<  std::endl;
 
-  //cout << "bytes per point: " << attributes.bytes << endl;
+  //cout << "bytes per point: " << attributes.bytes << std::endl;
   ss << string_utils::left_pad(gen_utils::format_number(bytes), ct) << std::endl;
   ss << std::string(ct, '=') << std::endl;
+
+  return ss.str();
+}
+
+std::string attributes::to_json() const {
+  std::stringstream ss;
+  ss << "[" << std::endl;
+
+  for (int i = 0; i < list.size(); i++) {
+    auto& attribute = list[i];
+
+    if (i == 0) {
+      ss << json_utils::tab(2) << "{" << std::endl;
+    }
+
+    ss << json_utils::tab(3) << json_utils::str_value("name") << ": " << json_utils::str_value(attribute.name) << "," << std::endl;
+    ss << json_utils::tab(3) << json_utils::str_value("description") << ": " << json_utils::str_value(attribute.description) << "," << std::endl;
+    ss << json_utils::tab(3) << json_utils::str_value("size") << ": " << attribute.size << "," << std::endl;
+    ss << json_utils::tab(3) << json_utils::str_value("numElements") << ": " << attribute.numElements << "," << std::endl;
+    ss << json_utils::tab(3) << json_utils::str_value("elementSize") << ": " << attribute.elementSize << "," << std::endl;
+    ss << json_utils::tab(3) << json_utils::str_value("type") << ": " << json_utils::str_value(attribute_utils::get_name(attribute.type)) << "," << std::endl;
+
+    bool empty_histogram = true;
+    for(int i = 0; i < attribute.histogram.size(); i++){
+      if(attribute.histogram[i] != 0){
+        empty_histogram = false;
+      }
+    }
+
+    if(attribute.size == 1 && !empty_histogram){
+      ss << json_utils::tab(3) << json_utils::str_value("histogram") << ": " << json_utils::to_json(attribute.histogram) << ", " << std::endl;
+    }
+
+    if (attribute.numElements == 1) {
+      ss << json_utils::tab(3) << json_utils::str_value("min") << ": " << json_utils::to_json(std::vector<double>{ attribute.min.x }) << "," << std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("max") << ": " << json_utils::to_json(std::vector<double>{ attribute.max.x }) << ","<< std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("scale") << ": " << json_utils::to_json(std::vector<double>{ attribute.scale.x }) << ","<< std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("offset") << ": " << json_utils::to_json(std::vector<double>{ attribute.offset.x }) << std::endl;
+    } 
+    else if (attribute.numElements == 2) {
+      ss << json_utils::tab(3) << json_utils::str_value("min") << ": " << json_utils::to_json(std::vector<double>{ attribute.min.x, attribute.min.y }) << "," << std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("max") << ": " << json_utils::to_json(std::vector<double>{ attribute.max.x, attribute.max.y }) << ","<< std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("scale") << ": " << json_utils::to_json(std::vector<double>{ attribute.scale.x, attribute.scale.y }) << ","<< std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("offset") << ": " << json_utils::to_json(std::vector<double>{ attribute.offset.x, attribute.offset.y }) << std::endl;
+    } 
+    else if (attribute.numElements == 3) {
+      ss << json_utils::tab(3) << json_utils::str_value("min") << ": " << json_utils::to_json(std::vector<double>{ attribute.min.x, attribute.min.y, attribute.min.z }) << "," << std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("max") << ": " << json_utils::to_json(std::vector<double>{ attribute.max.x, attribute.max.y, attribute.max.z }) << ","<< std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("scale") << ": " << json_utils::to_json(std::vector<double>{ attribute.scale.x, attribute.scale.y, attribute.scale.z }) << ","<< std::endl;
+      ss << json_utils::tab(3) << json_utils::str_value("offset") << ": " << json_utils::to_json(std::vector<double>{ attribute.offset.x, attribute.offset.y, attribute.offset.z }) << std::endl;
+    }
+
+    if (i < list.size() - 1) {
+      ss << json_utils::tab(2) << "},{" << std::endl;
+    } 
+    else {
+      ss << json_utils::tab(2) << "}" << std::endl;
+    }
+
+  }
+  
+  ss << json_utils::tab(1) << "]";
 
   return ss.str();
 }

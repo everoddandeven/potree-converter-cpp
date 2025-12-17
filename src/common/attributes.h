@@ -49,6 +49,7 @@ namespace potree {
     }
 
     std::string to_string() const;
+    std::string to_json() const;
 
   };
 

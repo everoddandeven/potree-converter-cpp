@@ -45,7 +45,7 @@ void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std
   vector3& scale = attrs.posScale;
   vector3& offset = attrs.posOffset;
 
-  n->traversePost([this, bytesPerPoint, base_spacing, scale, offset, &on_complete, &on_discard, attrs](potree::node* node) {
+  n->traversePost([this, bytesPerPoint, base_spacing, scale, offset, &on_complete, &on_discard, attrs](const std::shared_ptr<potree::node>& node) {
     node->sampled = true;
 
     int64_t numPoints = node->numPoints;

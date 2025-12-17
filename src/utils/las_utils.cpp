@@ -601,7 +601,7 @@ void las_utils::to_laz(const std::string& potree_path) {
 	auto root = node::load_hierarchy(potree_path, metadata);
 	point_levels levels(10);
 
-	root->traverse([&levels, potree_path, attrs](node* node, int level){
+	root->traverse([potree_path, attrs, &levels](const std::shared_ptr<potree::node>& node, int level){
 		std::vector<colored_point>& points = levels[level];
 		auto buffer = file_utils::read_binary(potree_path + "/octree.bin", node->byteOffset, node->byteSize);
 		int bpp = attrs.bytes;

@@ -82,5 +82,15 @@ namespace gen_utils {
   memory_data get_memory_data();
   cpu_data get_cpu_data();
   size_t get_num_processors();
+
+  static inline std::string to_digits(double value) {
+    auto digits = std::numeric_limits<double>::max_digits10;
+
+		std::stringstream ss;
+		ss << std::setprecision(digits);
+		ss << value;
+		
+		return ss.str();
+  }
 }
 }

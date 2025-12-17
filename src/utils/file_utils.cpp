@@ -44,13 +44,35 @@ std::vector<uint8_t> file_utils::read_binary(const std::string& path, uint64_t s
     fread(b.data(), 1, clamped_size, file);
     fclose(file);
     return b;
-  } else {
+  } 
+  else {
     std::vector<uint8_t> b(size);
     fseek_64_all_platforms(file, start, SEEK_SET);
     fread(b.data(), 1, size, file);
     fclose(file);
     return b;
   }
+}
+
+void file_utils::read_binary(const std::string& path, uint64_t start, uint64_t size, void* target) {
+	auto file = fopen(path.c_str(), "rb");
+
+	auto total_size = std::filesystem::file_size(path);
+
+	if (start >= total_size) return;
+	
+  if (start + size > total_size) {
+		auto clamped_size = total_size - start;
+		fseek_64_all_platforms(file, start, SEEK_SET);
+		fread(target, 1, clamped_size, file);
+		fclose(file);
+	} 
+  else {
+		fseek_64_all_platforms(file, start, SEEK_SET);
+		fread(target, 1, size, file);
+		fclose(file);
+	}
+
 }
 
 json file_utils::read_json(const std::string& path) {
