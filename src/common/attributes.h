@@ -23,7 +23,7 @@ namespace potree {
       }
     }
 
-    int getOffset(std::string name) {
+    int getOffset(std::string name) const {
       int offset = 0;
 
       for (auto& attribute : list) {

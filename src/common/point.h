@@ -20,6 +20,12 @@ namespace potree {
     static std::pair<int64_t_point, int64_t_point> compute_box(const std::vector<int64_t_point>& pts);
   };
 
+  struct int32_t_point {
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t z = 0;
+  };
+
   struct colored_point : point {
     uint16_t r = 0;
 		uint16_t g = 0;

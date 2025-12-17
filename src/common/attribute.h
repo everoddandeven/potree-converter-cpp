@@ -34,5 +34,14 @@ namespace potree {
       this->elementSize = elementSize;
       this->type = type;
     }
+
+    bool is_rgb() const { return name == "rgb"; }
+    bool is_position() const { return name == "position"; }
+    std::string get_morton_name() const {
+      if (is_position()) return "position_morton";
+      else if (is_rgb()) return "rgb_morton";
+      return name;
+    }
+
   };
 }
