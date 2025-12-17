@@ -1,3 +1,4 @@
+#include <execution>
 #include "node.h"
 #include "utils/attribute_utils.h"
 #include "utils/file_utils.h"
@@ -185,3 +186,25 @@ std::vector<int64_t_point> node::get_points(const attributes& attrs) const {
   return pts;
 }
 
+bool node::compare_distance_to_center(const point& a, const point& b) const {
+  auto center = get_center();
+  auto ax = a.x - center.x;
+  auto ay = a.y - center.y;
+  auto az = a.z - center.z;
+  auto add = ax * ax + ay * ay + az * az;
+
+  auto bx = b.x - center.x;
+  auto by = b.y - center.y;
+  auto bz = b.z - center.z;
+  auto bdd = bx * bx + by * by + bz * bz;
+
+  // sort by distance to center
+  return add < bdd;
+}
+
+void node::sort_by_distance_to_center(std::vector<point>& points) const {
+  auto parallel = std::execution::par_unseq;
+  std::sort(parallel, points.begin(), points.end(), [this](const point& a, const point& b) -> bool {
+    return compare_distance_to_center(a, b);
+  });
+}

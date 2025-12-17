@@ -48,6 +48,7 @@ set(HEADER_FILES
   ./src/sampler/sampler_point.h
   ./src/sampler/sampler_state.h
   ./src/sampler/sampler.h
+  ./src/sampler/sampler_poisson.h
   ./src/sampler/sampler_random.h
   ./src/utils/gen_utils.h
   ./src/utils/file_utils.h
@@ -70,6 +71,7 @@ set(SRC_FILES
   ./src/las/las_info.cpp
   ./src/las/las_header.cpp
   ./src/sampler/sampler_cell_index.cpp
+  ./src/sampler/sampler_poisson.cpp
   ./src/sampler/sampler_random.cpp
   ./src/utils/attribute_utils.cpp
   ./src/utils/chunk_utils.cpp

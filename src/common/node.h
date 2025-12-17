@@ -54,6 +54,9 @@ namespace potree {
     node(const std::string& id, int num_points);
 
     int64_t get_level() const { return name.size() - 1; }
+    vector3 get_center() const { return (min + max) * 0.5; }
+    bool compare_distance_to_center(const point& a, const point& b) const;
+    void sort_by_distance_to_center(std::vector<point>& points) const;
     bool isLeaf() const;
     void addDescendant(std::shared_ptr<node> descendant);
     void traverse(std::function<void(node*, int)> callback, int level = 0);

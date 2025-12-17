@@ -24,3 +24,11 @@ std::pair<int64_t_point, int64_t_point> int64_t_point::compute_box(const std::ve
 
   return { min, max };
 }
+
+double point::square_distance(const point& a, const point& b) {
+  double dx = a.x - b.x;
+  double dy = a.y - b.y;
+  double dz = a.z - b.z;
+
+  return dx * dx + dy * dy + dz * dz;
+}
