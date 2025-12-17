@@ -22,6 +22,14 @@ add_subdirectory(${LASZIP})
 set(JSON "${CMAKE_SOURCE_DIR}/external/json" CACHE STRING "JSON source directory")
 message(STATUS "Found JSON library in ${JSON}")
 
+####################
+# brotli
+####################
+
+set(BROTLI "${CMAKE_SOURCE_DIR}/external/brotli" CACHE STRING "BROTLI source directory")
+message(STATUS "Found BROTLI library in ${BROTLI}")
+add_subdirectory(${BROTLI})
+
 set(HEADER_FILES  
 	./src/common/attribute_type.h
   ./src/common/attribute.h
@@ -89,9 +97,10 @@ target_include_directories(potree-converter-cpp PUBLIC
   src
   "${LASZIP}/include"
   "${JSON}/single_include"
+  "${BROTLI}/include"
 )
 
-target_link_libraries(potree-converter-cpp laszip3)
+target_link_libraries(potree-converter-cpp laszip3 brotlienc-static brotlidec-static)
 
 if (UNIX)
 	find_package(Threads REQUIRED)
