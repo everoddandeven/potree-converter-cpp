@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/vector3.h"
-#include "common/attributes.h"
+#include "geometry/vector3.h"
+#include "geometry/attributes.h"
 
 namespace potree {
 

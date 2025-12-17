@@ -2,10 +2,10 @@
 
 #include <functional>
 #include "laszip/laszip_api.h"
-#include "common/attributes.h"
-#include "gen_utils.h"
-#include "task.h"
+#include "geometry/attributes.h"
+#include "common/task.h"
 #include "las/las_header.h"
+#include "gen_utils.h"
 
 namespace potree {
 namespace las_utils {

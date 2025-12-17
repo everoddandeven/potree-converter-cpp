@@ -1,5 +1,5 @@
 #include "task.h"
-#include "gen_utils.h"
+#include "utils/gen_utils.h"
 
 using namespace potree;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/vector3.h"
+#include "geometry/vector3.h"
 #include "las_vlr.h"
 
 namespace potree {

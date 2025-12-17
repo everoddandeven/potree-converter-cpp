@@ -4,7 +4,7 @@ using namespace potree;
 
 bool sampler_poisson::accept(
   const point& candidate, const vector3& center, double spacing,
-  int64_t num_accepted, std::vector<sampler_point>& accepted
+  int64_t num_accepted, std::vector<sample_point>& accepted
 ) {
   auto cx = candidate.x - center.x;
   auto cy = candidate.y - center.y;
@@ -42,8 +42,8 @@ bool sampler_poisson::accept(
 
 void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std::function<void(node*)> on_complete, std::function<void(node*)> on_discard) {
   int bytesPerPoint = attrs.bytes;
-  vector3& scale = attrs.posScale;
-  vector3& offset = attrs.posOffset;
+  vector3& scale = attrs.m_pos_scale;
+  vector3& offset = attrs.m_pos_offset;
 
   n->traversePost([this, bytesPerPoint, base_spacing, scale, offset, &on_complete, &on_discard, attrs](const std::shared_ptr<potree::node>& node) {
     node->sampled = true;
@@ -53,8 +53,8 @@ void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std
     auto max = node->max;
     auto min = node->min;
     auto size = max - min;
-    auto scale = attrs.posScale;
-    auto offset = attrs.posOffset;
+    auto scale = attrs.m_pos_scale;
+    auto offset = attrs.m_pos_offset;
 
     if (node->isLeaf()) {      
       return false;
@@ -99,7 +99,7 @@ void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std
         double y = (xyz[1] * scale.y) + offset.y;
         double z = (xyz[2] * scale.z) + offset.z;
 
-        sampler_point p = { x, y, z, i, childIndex };
+        sample_point p = { x, y, z, i, childIndex };
         points.push_back(p);
       }
 
@@ -109,11 +109,11 @@ void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std
     double spacing = base_spacing / pow(2.0, node->get_level());
     node->sort_by_distance_to_center(points);
     const auto center = node->get_center();
-    thread_local std::vector<sampler_point> accepted_v(1'000'000);
+    thread_local std::vector<sample_point> accepted_v(1'000'000);
     int64_t num_accepted = 0;
 
     for(const point& p : points) {
-      auto point = static_cast<sampler_point>(p);
+      auto point = static_cast<sample_point>(p);
 
       if (accept(point, center, spacing, num_accepted, accepted_v)) {
         accepted_v[num_accepted] = point;

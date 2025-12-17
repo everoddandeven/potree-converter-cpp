@@ -110,8 +110,8 @@ attributes node::parse_attributes(const json& metadata) {
   double offsetZ = metadata["offset"][2];
 
   attributes attrs(attributeList);
-  attrs.posScale = { scaleX, scaleY, scaleZ };
-  attrs.posOffset = { offsetX, offsetY, offsetZ };
+  attrs.m_pos_scale = { scaleX, scaleY, scaleZ };
+  attrs.m_pos_offset = { offsetX, offsetY, offsetZ };
 
   return attrs;
 }

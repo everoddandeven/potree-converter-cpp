@@ -1,7 +1,7 @@
 #pragma once
 
-#include "bounding_box.h"
 #include "attributes.h"
+#include "bounding_box.h"
 
 namespace potree {
   struct chunk : public bounding_box {

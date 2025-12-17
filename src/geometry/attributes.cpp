@@ -6,6 +6,38 @@
 
 using namespace potree;
 
+attributes::attributes(std::vector<attribute> attributes) {
+  m_list = attributes;
+
+  for (auto& attribute : attributes) {
+    bytes += attribute.size;
+  }
+}
+
+int attributes::get_offset(std::string name) const {
+  int offset = 0;
+
+  for (auto& attribute : m_list) {
+
+    if (attribute.name == name) {
+      return offset;
+    }
+
+    offset += attribute.size;
+  }
+
+  return -1;
+}
+
+attribute* attributes::get(std::string name) {
+  for (auto& attribute : m_list) {
+    if (attribute.name == name) {
+      return &attribute;
+    }
+  }
+  
+  return nullptr;
+}
 
 std::string attributes::to_string() const {
   std::stringstream ss;
@@ -21,7 +53,7 @@ std::string attributes::to_string() const {
   ss << std::string(ct, '=') << std::endl;
 
   int offset = 0;
-  for (auto attribute : list) {
+  for (auto attribute : m_list) {
     ss << string_utils::right_pad(attribute.name, c0)
       << string_utils::left_pad(gen_utils::format_number(offset), c1)
       << string_utils::left_pad(gen_utils::format_number(attribute.size), c2)
@@ -42,8 +74,8 @@ std::string attributes::to_json() const {
   std::stringstream ss;
   ss << "[" << std::endl;
 
-  for (int i = 0; i < list.size(); i++) {
-    auto& attribute = list[i];
+  for (int i = 0; i < m_list.size(); i++) {
+    auto& attribute = m_list[i];
 
     if (i == 0) {
       ss << json_utils::tab(2) << "{" << std::endl;
@@ -86,7 +118,7 @@ std::string attributes::to_json() const {
       ss << json_utils::tab(3) << json_utils::str_value("offset") << ": " << json_utils::to_json(std::vector<double>{ attribute.offset.x, attribute.offset.y, attribute.offset.z }) << std::endl;
     }
 
-    if (i < list.size() - 1) {
+    if (i < m_list.size() - 1) {
       ss << json_utils::tab(2) << "},{" << std::endl;
     } 
     else {

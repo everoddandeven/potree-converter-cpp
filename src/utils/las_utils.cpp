@@ -1,7 +1,7 @@
-#include "common/scale_offset.h"
-#include "common/point.h"
-#include "common/bounding_box.h"
-#include "common/node.h"
+#include "geometry/scale_offset.h"
+#include "geometry/point.h"
+#include "geometry/bounding_box.h"
+#include "geometry/node.h"
 #include "common/file_source.h"
 #include "las/las_info.h"
 #include "las_utils.h"
@@ -210,8 +210,8 @@ void las_utils::cell_point_counter::init_processor() {
 
 		double coordinates[3];
 
-		auto posScale = this->m_out_attributes.posScale;
-		auto posOffset = this->m_out_attributes.posOffset;
+		auto pos_scale = this->m_out_attributes.m_pos_scale;
+		auto pos_offset = this->m_out_attributes.m_pos_offset;
 
 		for (int i = 0; i < numToRead; i++) {
 			int64_t pointOffset = i * bpp;
@@ -225,13 +225,13 @@ void las_utils::cell_point_counter::init_processor() {
 				double y = coordinates[1];
 				double z = coordinates[2];
 
-				int32_t X = int32_t((x - posOffset.x) / posScale.x);
-				int32_t Y = int32_t((y - posOffset.y) / posScale.y);
-				int32_t Z = int32_t((z - posOffset.z) / posScale.z);
+				int32_t X = int32_t((x - pos_offset.x) / pos_scale.x);
+				int32_t Y = int32_t((y - pos_offset.y) / pos_scale.y);
+				int32_t Z = int32_t((z - pos_offset.z) / pos_scale.z);
 
-				double ux = (double(X) * posScale.x + posOffset.x - min.x) / size.x;
-				double uy = (double(Y) * posScale.y + posOffset.y - min.y) / size.y;
-				double uz = (double(Z) * posScale.z + posOffset.z - min.z) / size.z;
+				double ux = (double(X) * pos_scale.x + pos_offset.x - min.x) / size.x;
+				double uy = (double(Y) * pos_scale.y + pos_offset.y - min.y) / size.y;
+				double uz = (double(Z) * pos_scale.z + pos_offset.z - min.z) / size.z;
 
 				bool inBox = ux >= 0.0 && uy >= 0.0 && uz >= 0.0;
 				inBox = inBox && ux <= 1.0 && uy <= 1.0 && uz <= 1.0;
@@ -521,8 +521,8 @@ attributes las_utils::compute_output_attributes(std::vector<file_source>& source
 	} 
 
 	attributes attrs(filteredAttributeList);
-	attrs.posScale = scale;
-	attrs.posOffset = offset;
+	attrs.m_pos_scale = scale;
+	attrs.m_pos_offset = offset;
 	return attrs;
 }
 
@@ -609,7 +609,7 @@ void las_utils::to_laz(const std::string& potree_path) {
 
 		int64_t rgbOffset = 0;
 		int64_t rgbOffsetFind = 0;
-		for (const auto& attribute : attrs.list) {
+		for (const auto& attribute : attrs.m_list) {
 			if (attribute.name == "rgb") {
 				rgbOffset = rgbOffsetFind;
 				break;
@@ -625,9 +625,9 @@ void las_utils::to_laz(const std::string& potree_path) {
 			int32_t iy = gen_utils::read_value<int32_t>(buffer, pointOffset + 4);
 			int32_t iz = gen_utils::read_value<int32_t>(buffer, pointOffset + 8);
 
-			double x = double(ix) * attrs.posScale.x + attrs.posOffset.x;
-			double y = double(iy) * attrs.posScale.y + attrs.posOffset.y;
-			double z = double(iz) * attrs.posScale.z + attrs.posOffset.z;
+			double x = double(ix) * attrs.m_pos_scale.x + attrs.m_pos_offset.x;
+			double y = double(iy) * attrs.m_pos_scale.y + attrs.m_pos_offset.y;
+			double z = double(iz) * attrs.m_pos_scale.z + attrs.m_pos_offset.z;
 
 			uint16_t r = gen_utils::read_value<uint16_t>(buffer, pointOffset + rgbOffset + 0);
 			uint16_t g = gen_utils::read_value<uint16_t>(buffer, pointOffset + rgbOffset + 2);
@@ -664,14 +664,14 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 	int attributeOffset = 0;
 
 	// reset min/max, we're writing the values to a per-thread copy anyway
-	for (auto& attribute : outputAttributes.list) {
+	for (auto& attribute : outputAttributes.m_list) {
 		attribute.min = { gen_utils::INF, gen_utils::INF, gen_utils::INF };
 		attribute.max = { -gen_utils::INF, -gen_utils::INF, -gen_utils::INF };
 	}
 
 	{ // STANDARD LAS ATTRIBUTES
 
-		int offsetRGB = outputAttributes.getOffset("rgb");
+		int offsetRGB = outputAttributes.get_offset("rgb");
 		attribute* attributeRGB = outputAttributes.get("rgb");
 		auto rgb = [data, point, header, offsetRGB, attributeRGB](int64_t offset) {
 			if (offsetRGB >= 0) {
@@ -690,7 +690,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			}
 		};
 
-		int offsetIntensity = outputAttributes.getOffset("intensity");
+		int offsetIntensity = outputAttributes.get_offset("intensity");
 		attribute* attributeIntensity = outputAttributes.get("intensity");
 		auto intensity = [data, point, header, offsetIntensity, attributeIntensity](int64_t offset) {
 			memcpy(data + offset + offsetIntensity, &point->intensity, 2);
@@ -699,7 +699,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeIntensity->max.x = std::max(attributeIntensity->max.x, double(point->intensity));
 		};
 
-		int offsetReturnNumber = outputAttributes.getOffset("return number");
+		int offsetReturnNumber = outputAttributes.get_offset("return number");
 		attribute* attributeReturnNumber = outputAttributes.get("return number");
 		auto returnNumber = [data, point, header, offsetReturnNumber, attributeReturnNumber](int64_t offset) {
 			uint8_t value = point->return_number;
@@ -710,7 +710,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeReturnNumber->max.x = std::max(attributeReturnNumber->max.x, double(value));
 		};
 
-		int offsetNumberOfReturns = outputAttributes.getOffset("number of returns");
+		int offsetNumberOfReturns = outputAttributes.get_offset("number of returns");
 		attribute* attributeNumberOfReturns = outputAttributes.get("number of returns");
 		auto numberOfReturns = [data, point, header, offsetNumberOfReturns, attributeNumberOfReturns](int64_t offset) {
 			uint8_t value = point->number_of_returns;
@@ -721,7 +721,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeNumberOfReturns->max.x = std::max(attributeNumberOfReturns->max.x, double(value));
 		};
 
-		int offsetScanAngleRank = outputAttributes.getOffset("scan angle rank");
+		int offsetScanAngleRank = outputAttributes.get_offset("scan angle rank");
 		attribute* attributeScanAngleRank = outputAttributes.get("scan angle rank");
 		auto scanAngleRank = [data, point, header, offsetScanAngleRank, attributeScanAngleRank](int64_t offset) {
 			memcpy(data + offset + offsetScanAngleRank, &point->scan_angle_rank, 1);
@@ -730,7 +730,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeScanAngleRank->max.x = std::max(attributeScanAngleRank->max.x, double(point->scan_angle_rank));
 		};
 
-		int offsetScanAngle= outputAttributes.getOffset("scan angle");
+		int offsetScanAngle= outputAttributes.get_offset("scan angle");
 		attribute* attributeScanAngle = outputAttributes.get("scan angle");
 		auto scanAngle = [data, point, header, offsetScanAngle, attributeScanAngle](int64_t offset) {
 			memcpy(data + offset + offsetScanAngle, &point->extended_scan_angle, 2);
@@ -739,7 +739,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeScanAngle->max.x = std::max(attributeScanAngle->max.x, double(point->extended_scan_angle));
 		};
 
-		int offsetUserData = outputAttributes.getOffset("user data");
+		int offsetUserData = outputAttributes.get_offset("user data");
 		attribute* attributeUserData = outputAttributes.get("user data");
 		auto userData = [data, point, header, offsetUserData, attributeUserData](int64_t offset) {
 			memcpy(data + offset + offsetUserData, &point->user_data, 1);
@@ -748,7 +748,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeUserData->max.x = std::max(attributeUserData->max.x, double(point->user_data));
 		};
 
-		int offsetClassification = outputAttributes.getOffset("classification");
+		int offsetClassification = outputAttributes.get_offset("classification");
 		attribute* attributeClassification = outputAttributes.get("classification");
 		auto classification = [data, point, header, offsetClassification, attributeClassification](int64_t offset) {
 			
@@ -766,7 +766,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeClassification->max.x = std::max(attributeClassification->max.x, double(value));
 		};
 
-		int offsetSourceId = outputAttributes.getOffset("point source id");
+		int offsetSourceId = outputAttributes.get_offset("point source id");
 		attribute* attributePointSourceId = outputAttributes.get("point source id");
 		auto pointSourceId = [data, point, header, offsetSourceId, attributePointSourceId](int64_t offset) {
 			memcpy(data + offset + offsetSourceId, &point->point_source_ID, 2);
@@ -775,7 +775,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributePointSourceId->max.x = std::max(attributePointSourceId->max.x, double(point->point_source_ID));
 		};
 
-		int offsetGpsTime= outputAttributes.getOffset("gps-time");
+		int offsetGpsTime= outputAttributes.get_offset("gps-time");
 		attribute* attributeGpsTime = outputAttributes.get("gps-time");
 		auto gpsTime = [data, point, header, offsetGpsTime, attributeGpsTime](int64_t offset) {
 			memcpy(data + offset + offsetGpsTime, &point->gps_time, 8);
@@ -784,7 +784,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			attributeGpsTime->max.x = std::max(attributeGpsTime->max.x, point->gps_time);
 		};
 
-		int offsetClassificationFlags = outputAttributes.getOffset("classification flags");
+		int offsetClassificationFlags = outputAttributes.get_offset("classification flags");
 		attribute* attributeClassificationFlags = outputAttributes.get("classification flags");
 		auto classificationFlags = [data, point, header, offsetClassificationFlags, attributeClassificationFlags](int64_t offset) {
 			uint8_t value = point->extended_classification_flags;
@@ -809,7 +809,7 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 			{"classification flags", classificationFlags},
 		};
 
-		for (auto& attribute : inputAttributes.list) {
+		for (auto& attribute : inputAttributes.m_list) {
 
 			attributeOffset += attribute.size;
 
@@ -854,13 +854,13 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 
 		int attributeOffset = 0;
 		for (int i = 0; i < firstExtraIndex; i++) {
-			attributeOffset += inputAttributes.list[i].size;
+			attributeOffset += inputAttributes.m_list[i].size;
 		}
 
-		for (int i = firstExtraIndex; i < inputAttributes.list.size(); i++) {
-			attribute& inputAttribute = inputAttributes.list[i];
+		for (int i = firstExtraIndex; i < inputAttributes.m_list.size(); i++) {
+			attribute& inputAttribute = inputAttributes.m_list[i];
 			attribute* attribute = outputAttributes.get(inputAttribute.name);
-			int targetOffset = outputAttributes.getOffset(inputAttribute.name);
+			int targetOffset = outputAttributes.get_offset(inputAttribute.name);
 
 			int attributeSize = inputAttribute.size;
 

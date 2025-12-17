@@ -1,8 +1,8 @@
 #pragma once
 
 #include "common/status.h"
-#include "common/chunk.h"
 #include "common/buffer.h"
+#include "geometry/chunk.h"
 #include "utils/concurrent_writer.h"
 
 namespace potree {

@@ -31,29 +31,28 @@ message(STATUS "Found BROTLI library in ${BROTLI}")
 add_subdirectory(${BROTLI})
 
 set(HEADER_FILES  
-	./src/common/attribute_type.h
-  ./src/common/attribute.h
-  ./src/common/attributes.h
-  ./src/common/bounding_box.h
   ./src/common/buffer.h
-  ./src/common/chunk.h
   ./src/common/cpu_data.h
   ./src/common/color.h
   ./src/common/file_source.h
-  ./src/common/hierarchy.h
-  ./src/common/las_point_f2.h
   ./src/common/memory_data.h
-  ./src/common/node.h
   ./src/common/options.h
-  ./src/common/point.h
-  ./src/common/scale_offset.h
   ./src/common/status.h
-  ./src/common/vector3.h
+  ./src/common/task.h
+	./src/geometry/attribute_type.h
+  ./src/geometry/attribute.h
+  ./src/geometry/attributes.h
+  ./src/geometry/bounding_box.h
+  ./src/geometry/cell_index.h
+  ./src/geometry/chunk.h
+  ./src/geometry/hierarchy.h
+  ./src/geometry/node.h
+  ./src/geometry/point.h
+  ./src/geometry/scale_offset.h
+  ./src/geometry/vector3.h
   ./src/las/las_header.h
   ./src/las/las_info.h
   ./src/las/las_vlr.h
-  ./src/sampler/sampler_cell_index.h
-  ./src/sampler/sampler_point.h
   ./src/sampler/sampler_state.h
   ./src/sampler/sampler.h
   ./src/sampler/sampler_poisson.h
@@ -66,20 +65,21 @@ set(HEADER_FILES
   ./src/utils/concurrent_writer.h
   ./src/utils/string_utils.h
   ./src/utils/las_utils.h
-  ./src/utils/task.h
 )
 
 set(SRC_FILES
-  ./src/common/attributes.cpp
-  ./src/common/bounding_box.cpp
-  ./src/common/hierarchy.cpp
-  ./src/common/node.cpp
-  ./src/common/point.cpp
-  ./src/common/scale_offset.cpp
-  ./src/common/vector3.cpp
+  ./src/common/buffer.cpp
+  ./src/common/task.cpp
+  ./src/geometry/attributes.cpp
+  ./src/geometry/bounding_box.cpp
+  ./src/geometry/cell_index.cpp
+  ./src/geometry/hierarchy.cpp
+  ./src/geometry/node.cpp
+  ./src/geometry/point.cpp
+  ./src/geometry/scale_offset.cpp
+  ./src/geometry/vector3.cpp
   ./src/las/las_info.cpp
   ./src/las/las_header.cpp
-  ./src/sampler/sampler_cell_index.cpp
   ./src/sampler/sampler_poisson.cpp
   ./src/sampler/sampler_random.cpp
   ./src/utils/attribute_utils.cpp
@@ -89,7 +89,6 @@ set(SRC_FILES
   ./src/utils/file_utils.cpp
   ./src/utils/gen_utils.cpp
   ./src/utils/las_utils.cpp
-  ./src/utils/task.cpp
 )
 
 add_library(potree-converter-cpp SHARED ${SRC_FILES})

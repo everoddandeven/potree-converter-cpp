@@ -1,6 +1,6 @@
 #pragma once 
 
-#include "vector3.h"
+#include "geometry/vector3.h"
 
 namespace potree {
   struct file_source {

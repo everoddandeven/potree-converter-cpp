@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/node.h"
+#include "geometry/node.h"
 
 namespace potree {
 namespace brotli_utils {

@@ -69,9 +69,9 @@ public:
     int64_t num_points = node->numPoints;
     uint8_t* source = node->points->data_u8;
 
-    for(const auto& attr : attrs.list) {
+    for(const auto& attr : attrs.m_list) {
       int64_t bytes = attr.size * num_points;
-      auto attr_offset = attrs.getOffset(attr.name);
+      auto attr_offset = attrs.get_offset(attr.name);
 
       if (attr.is_rgb()) {
         auto mc_buffer = std::make_shared<potree::buffer>(8 * num_points);
@@ -187,7 +187,7 @@ private:
   int64_t get_buffer_size() {
     int64_t buffer_size = 0;
 
-    for(const auto& attr : m_attrs.list) {
+    for(const auto& attr : m_attrs.m_list) {
       std::string name = attr.get_morton_name();
       auto& buffer = m_buffers[name];
       buffer_size += buffer->size;
@@ -201,7 +201,7 @@ private:
 
     auto merged_buffer = std::make_shared<potree::buffer>(buffer_size);
 
-    for(const auto& attr : m_attrs.list) {
+    for(const auto& attr : m_attrs.m_list) {
       auto& buffer = m_buffers[attr.get_morton_name()];
       int64_t buffer_attr_size = buffer->size / m_num_points;
 

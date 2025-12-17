@@ -4,12 +4,12 @@
 #include <mutex>
 #include <functional>
 #include "nlohmann/json.hpp"
-#include "vector3.h"
-#include "color.h"
-#include "buffer.h"
-#include "bounding_box.h"
+#include "common/color.h"
+#include "common/buffer.h"
 #include "attributes.h"
+#include "vector3.h"
 #include "point.h"
+#include "bounding_box.h"
 
 using namespace nlohmann;
 

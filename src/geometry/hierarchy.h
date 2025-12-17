@@ -4,9 +4,9 @@
 #include <unordered_map>
 #include <deque>
 #include <fstream>
+#include "common/options.h"
 #include "node.h"
 #include "chunk.h"
-#include "options.h"
 
 namespace potree {
 

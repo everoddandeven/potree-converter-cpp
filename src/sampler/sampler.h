@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/node.h"
-#include "common/attributes.h"
+#include "geometry/attributes.h"
+#include "geometry/node.h"
 
 namespace potree {
   struct sampler {

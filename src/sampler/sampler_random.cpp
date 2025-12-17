@@ -1,31 +1,31 @@
 #include <random>
 #include <chrono>
+#include "geometry/cell_index.h"
+#include "geometry/point.h"
 #include "sampler_random.h"
-#include "sampler_point.h"
-#include "sampler_cell_index.h"
 
 using namespace potree;
 
 void sampler_random::sample(node* n, attributes attrs, double base_spacing, std::function<void(node*)> on_complete, std::function<void(node*)> on_discard) {
   int bytesPerPoint = attrs.bytes;
-  vector3& scale = attrs.posScale;
-  vector3& offset = attrs.posOffset;
+  vector3& scale = attrs.m_pos_scale;
+  vector3& offset = attrs.m_pos_offset;
 
   n->traversePost([bytesPerPoint, base_spacing, scale, offset, &on_complete, &on_discard, attrs](const std::shared_ptr<potree::node>& node) {
     node->sampled = true;
 
     int64_t numPoints = node->numPoints;
 
-    int64_t gridSize = 128;
-    thread_local std::vector<int64_t> grid(gridSize* gridSize* gridSize, -1);
+    int64_t grid_size = 128;
+    thread_local std::vector<int64_t> grid(grid_size* grid_size* grid_size, -1);
     thread_local int64_t iteration = 0;
     iteration++;
 
     auto max = node->max;
     auto min = node->min;
     auto size = max - min;
-    auto scale = attrs.posScale;
-    auto offset = attrs.posOffset;
+    auto scale = attrs.m_pos_scale;
+    auto offset = attrs.m_pos_offset;
 
     if (node->isLeaf()) {
       // a not particularly efficient approach to shuffling
@@ -78,7 +78,7 @@ void sampler_random::sample(node* n, attributes attrs, double base_spacing, std:
         double y = (xyz[1] * scale.y) + offset.y;
         double z = (xyz[2] * scale.z) + offset.z;
 
-        auto cellIndex = sampler_cell_index::convert(min, size, { x, y, z }, gridSize);
+        auto cellIndex = cell_index::convert(min, size, { x, y, z }, grid_size);
         auto& gridValue = grid[cellIndex.index];
         static double all = sqrt(3.0);
         bool isAccepted = false;

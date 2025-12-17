@@ -1,10 +1,10 @@
 #include <filesystem>
-#include "common/node.h"
+#include "geometry/node.h"
+#include "common/task.h"
 #include "chunk_utils.h"
-#include "utils/task.h"
-#include "utils/file_utils.h"
-#include "utils/attribute_utils.h"
-#include "utils/string_utils.h"
+#include "file_utils.h"
+#include "attribute_utils.h"
+#include "string_utils.h"
 #include "las_utils.h"
 
 using namespace potree;
@@ -18,7 +18,7 @@ void write_metadata(const std::string& path, const vector3& min, const vector3& 
 	js["max"] = { max.x, max.y, max.z };
 
 	js["attributes"] = {};
-	for (const auto& attribute : attrs.list) {
+	for (const auto& attribute : attrs.m_list) {
 
 		json js_attr;
 		js_attr["name"] = attribute.name;
@@ -62,14 +62,14 @@ void write_metadata(const std::string& path, const vector3& min, const vector3& 
 	}
 
 	js["scale"] = std::vector<double>({
-		attrs.posScale.x, 
-		attrs.posScale.y, 
-		attrs.posScale.z});
+		attrs.m_pos_scale.x, 
+		attrs.m_pos_scale.y, 
+		attrs.m_pos_scale.z});
 
 	js["offset"] = std::vector<double>({
-		attrs.posOffset.x,
-		attrs.posOffset.y,
-		attrs.posOffset.z });
+		attrs.m_pos_offset.x,
+		attrs.m_pos_offset.y,
+		attrs.m_pos_offset.z });
 
 	string content = js.dump(4);
 
@@ -307,8 +307,8 @@ private:
 				task->firstPoint = numRead;
 				task->path = source.path;
 				//task->scale = { header->x_scale_factor, header->y_scale_factor, header->z_scale_factor };
-				task->scale = m_out_attributes.posScale;
-				task->offset = m_out_attributes.posOffset;
+				task->scale = m_out_attributes.m_pos_scale;
+				task->offset = m_out_attributes.m_pos_offset;
 				task->min = m_min;
 				task->max = m_max;
 				task->inputAttributes = inputAttributes;
@@ -367,8 +367,8 @@ std::shared_ptr<chunks> chunk_utils::load_chunks(const std::string& path_in) {
   double offsetZ = js["offset"][2];
 
   attributes attrs(attributeList);
-  attrs.posScale = { scaleX, scaleY, scaleZ };
-  attrs.posOffset = { offsetX, offsetY, offsetZ };
+  attrs.m_pos_scale = { scaleX, scaleY, scaleZ };
+  attrs.m_pos_offset = { offsetX, offsetY, offsetZ };
 
 
   auto toID = [](std::string filename) -> std::string {
@@ -424,8 +424,8 @@ void chunk_utils::refine_chunk(const std::shared_ptr<chunk>& chunk, const attrib
 
     auto min = chunk->min;
     auto size = chunk->max - min;
-    auto scale = attrs.posScale;
-    auto offset = attrs.posOffset;
+    auto scale = attrs.m_pos_scale;
+    auto offset = attrs.m_pos_offset;
     auto bpp = attrs.bytes;
 
     auto gridIndexOf = [&points, bpp, scale, offset, min, size, grid_size](int64_t pointIndex) {

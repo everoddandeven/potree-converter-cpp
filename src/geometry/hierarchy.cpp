@@ -1,13 +1,13 @@
-#include "hierarchy.h"
-#include "utils/string_utils.h"
-#include "utils/file_utils.h"
-#include "utils/brotli_utils.h"
-#include "utils/task.h"
-#include "buffer.h"
 #include <filesystem>
 #include <deque>
 #include <condition_variable>
 #include <chrono>
+#include "common/task.h"
+#include "common/buffer.h"
+#include "utils/string_utils.h"
+#include "utils/file_utils.h"
+#include "utils/brotli_utils.h"
+#include "hierarchy.h"
 
 using namespace potree;
 using namespace std::chrono_literals;
@@ -46,7 +46,7 @@ void hierarchy_writer::write_and_unload(const std::shared_ptr<potree::node>& nod
   if(node->numPoints == 0) return;
 
   auto attributes = m_indexer->m_attributes;
-  std::string encoding = m_indexer->m_options.encoding;
+  std::string encoding = m_indexer->m_options.m_encoding;
   std::shared_ptr<potree::buffer> sourceBuffer;
 
   if (encoding == "BROTLI") {

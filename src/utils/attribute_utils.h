@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/attribute_type.h"
+#include "geometry/attribute_type.h"
 
 namespace potree {
 namespace attribute_utils {
