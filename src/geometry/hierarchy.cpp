@@ -7,6 +7,7 @@
 #include "utils/string_utils.h"
 #include "utils/file_utils.h"
 #include "utils/brotli_utils.h"
+#include "utils/json_utils.h"
 #include "hierarchy.h"
 
 using namespace potree;
@@ -33,6 +34,16 @@ void check_error(const std::shared_ptr<potree::node>& node, int64_t size) {
   << "#points: " << node->numPoints << std::endl
   << "min: " << node->min.to_string() << std::endl
   << "max: " << node->max.to_string() << std::endl;
+}
+
+std::string hierarchy::to_json(int64_t depth) const {
+  std::stringstream ss;
+  ss << "{" << std::endl;
+  ss << json_utils::tab(2) << json_utils::str_value("firstChunkSize") << ": " << m_first_chunk_size << ", " << std::endl;
+  ss << json_utils::tab(2) << json_utils::str_value("stepSize") << ": " << m_step_size << ", " << std::endl;
+  ss << json_utils::tab(2) << json_utils::str_value("depth") << ": " << depth << std::endl;
+  ss << json_utils::tab(1) << "}";
+  return ss.str();
 }
 
 hierarchy_writer::hierarchy_writer(const std::shared_ptr<hierarchy_indexer>& indexer) {
@@ -790,4 +801,26 @@ std::vector<chunk_node> hierarchy_indexer::process_chunk_roots() {
   cr_root->traverse(on_traverse);
 
   return tasks;
+}
+
+std::string hierarchy_indexer::build_metadata(const options& opts, const std::shared_ptr<status>& state, const hierarchy& hry) {
+  std::stringstream ss;
+  bounding_box bbox {m_root->min, m_root->max};
+
+	ss << json_utils::tab(0) << "{" << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("version") << ": " << json_utils::str_value("2.0") << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("name") << ": " << json_utils::str_value(opts.m_name) << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("description") << ": " << json_utils::str_value("") << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("points") << ": " << state->pointsTotal << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("projection") << ": " << json_utils::str_value(opts.m_projection) << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("hierarchy") << ": " << hry.to_json(m_octree_depth) << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("offset") << ": " << m_attributes.m_pos_offset.to_json() << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("scale") << ": " << m_attributes.m_pos_scale.to_json() << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("spacing") << ": " << gen_utils::to_digits(m_spacing) << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("boundingBox") << ": " << bbox.to_json() << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("encoding") << ": " << json_utils::str_value(opts.m_encoding) << "," << std::endl;
+	ss << json_utils::tab(1) << json_utils::str_value("attributes") << ": " << m_attributes.to_json() << std::endl;
+	ss << json_utils::tab(0) << "}" << std::endl;
+
+	return ss.str();
 }

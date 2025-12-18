@@ -15,6 +15,8 @@ namespace potree {
     int64_t m_first_chunk_size = 0;
     int64_t m_step_size = 0;
     std::vector<uint8_t> m_buffer;
+
+    std::string to_json(int64_t depth) const;
   };
 
   struct hierarchy_builder {
@@ -100,9 +102,11 @@ namespace potree {
   private:
     std::mutex m_mtx;
     std::mutex m_root_mtx;
+    std::mutex m_depth_mtx;
   
     double m_scale = 0.001;
     double m_spacing = 1.0;
+    int64_t m_octree_depth = 0;
     std::atomic_int64_t m_dbg = 0;
     std::unique_ptr<hierarchy_writer> m_writer;
     std::shared_ptr<hierarchy_flusher> m_flusher;
