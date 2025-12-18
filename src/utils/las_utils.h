@@ -64,5 +64,9 @@ namespace las_utils {
     laszip_header* header, uint8_t* data, laszip_point* point, 
     attributes& inputAttributes, attributes& outputAttributes
   );
+  int process_position(
+    const std::string& path, int64_t batch_size, const vector3& scale, 
+    const attributes& attrs, attributes& in_attrs, attributes& out_attrs, uint8_t* data, int64_t first_point
+  );
 }
 }

@@ -131,3 +131,24 @@ std::string attributes::to_json() const {
 
   return ss.str();
 }
+
+int64_t attributes::get_index(uint8_t* xyz_data, const vector3& scale, int64_t grid_size, const vector3& size, const vector3& min, int64_t point_offset) const {
+  int32_t* xyz = reinterpret_cast<int32_t*>(&xyz_data[0] + point_offset);
+  int32_t X = xyz[0];
+  int32_t Y = xyz[1];
+  int32_t Z = xyz[2];
+
+  double ux = (double(X) * scale.x + m_pos_offset.x - min.x) / size.x;
+  double uy = (double(Y) * scale.y + m_pos_offset.y - min.y) / size.y;
+  double uz = (double(Z) * scale.z + m_pos_offset.z - min.z) / size.z;
+  double d_grid_size = double(grid_size);
+
+  int64_t ix = int64_t(std::min(d_grid_size * ux, d_grid_size - 1.0));
+  int64_t iy = int64_t(std::min(d_grid_size * uy, d_grid_size - 1.0));
+  int64_t iz = int64_t(std::min(d_grid_size * uz, d_grid_size - 1.0));
+
+  int64_t index = ix + iy * grid_size + iz * grid_size * grid_size;
+
+  return index;
+}
+

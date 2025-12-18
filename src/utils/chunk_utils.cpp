@@ -243,6 +243,20 @@ public:
   // end params
   std::vector<potree::node> m_nodes;
   std::unique_ptr<task_pool> m_pool;
+  std::shared_ptr<concurrent_writer> m_writer;
+
+  double get_cube_size() const {
+    return (m_max - m_min).max();
+  }
+
+  vector3 get_cube() const {
+    double size = get_cube_size();
+    return { size, size, size };
+  }
+
+  vector3 get_cube_max() const {
+    return m_min + get_cube_size();
+  }
 
   void distribute() {
     gen_utils::profiler pr("point_distributor::distribute()");
@@ -250,19 +264,130 @@ public:
     m_state->pointsProcessed = 0;
     m_state->bytesProcessed = 0;
     m_state->duration = 0;
-    auto writer = std::make_shared<concurrent_writer>(num_processors, m_state);
+    m_writer = std::make_shared<concurrent_writer>(num_processors, m_state);
     init_processor();
     m_pool = std::make_unique<task_pool>(num_processors, m_processor);
     process_sources();
     m_pool->close();
-    writer->join();
+    m_writer->join();
   }
 
 private:
   std::function<void(std::shared_ptr<task>)> m_processor;
+  std::mutex m_mtx;
 
   void init_processor() {
-    throw std::runtime_error("not implemented");
+    m_processor = [this](std::shared_ptr<task> t) {
+      auto task = std::static_pointer_cast<distribution_task>(t);
+
+      int bpp = m_out_attributes.bytes;
+      auto num_bytes = bpp * task->batchSize;
+      int64_t grid_size = task->lut->m_grid_size;
+      auto& grid = task->lut->m_grid;
+
+			thread_local unique_ptr<void, void(*)(void*)> buffer(nullptr, free);
+			thread_local int64_t buffer_size = -1;
+
+      // sanity checks
+      if (num_bytes < 0) MERROR << "point_distributor::m_processor: invalid malloc size: " << gen_utils::format_number(num_bytes) << std::endl;
+
+      if (buffer_size < num_bytes) {
+        buffer.reset(malloc(num_bytes));
+        buffer_size = num_bytes;
+      }
+
+      uint8_t* data = reinterpret_cast<uint8_t*>(buffer.get());
+			// memset necessary if attribute handlers don't set all values. 
+			// previous handlers from input with different point formats
+			// may have set the values before.
+			memset(data, 0, buffer_size);
+      m_writer->wait_for_memory_threshold(2'000);
+
+			int point_format = -1;
+			// per-thread copy of outputAttributes to compute min/max in a thread-safe way
+			// will be merged to global outputAttributes instance at the end of this function
+			auto out_attrs = m_out_attributes;
+			
+      for(auto& attribute: out_attrs.m_list){
+				if(attribute.is_classification()){
+					for(int i = 0; i < attribute.histogram.size(); i++){
+						attribute.histogram[i] = 0;
+					}
+				}
+			}
+
+      las_utils::process_position(task->path, task->batchSize, task->scale, m_out_attributes, task->inputAttributes, out_attrs, data, task->firstPoint);
+    
+      vector3 max = get_cube_max();
+      vector3 size = get_cube();
+      std::vector<int64_t> counts(m_nodes.size(), 0);
+      std::vector<std::shared_ptr<potree::buffer>> buckets(m_nodes.size(), nullptr);
+      std::shared_ptr<potree::buffer> prev_bucket;
+      int64_t prev_node_idx = -1;
+
+      // count points per bucket
+      for(int64_t i = 0; i < task->batchSize; i++) {
+        auto idx = m_out_attributes.get_index(data, task->scale, grid_size, size, m_min, i * bpp);
+        auto node_idx = grid[idx];
+
+        if (node_idx == -1) {
+          throw std::runtime_error("Point to node lookup failed, no node found.");
+        }
+
+        counts[node_idx]++;
+      }
+
+      // allocate buckets
+      for(int64_t i = 0; i < m_nodes.size(); i++) {
+				int64_t num_points = counts[i];
+				int64_t bytes = num_points * bpp;
+				buckets[i] = std::make_shared<potree::buffer>(bytes);
+      }
+
+      // add points to buckets
+      for(int64_t i = 0; i < task->batchSize; i++) {
+      	int64_t pt_offset = i * bpp;
+				auto idx = m_out_attributes.get_index(data, task->scale, grid_size, size, m_min, pt_offset);
+				auto node_idx = grid[idx];
+				auto& node = m_nodes[node_idx];
+
+				if (node_idx == prev_node_idx) {
+					prev_bucket->write(&data[0] + pt_offset, bpp);
+				} 
+        else {
+					prev_bucket = buckets[node_idx];
+					prev_node_idx = node_idx;
+					prev_bucket->write(&data[0] + pt_offset, bpp);
+				}
+      }
+    
+    	m_state->pointsProcessed += task->batchSize;
+			m_state->bytesProcessed += num_bytes;
+			//m_state->duration = gen_utils::now() - tStart;
+      chunk_utils::add_buckets(m_nodes, buckets, m_writer, m_target_dir);
+      
+			// merge attribute metadata of this batch into global attribute metadata
+			for (int i = 0; i < out_attrs.m_list.size(); i++) {
+				auto& source = out_attrs.m_list[i];
+				auto& target = m_out_attributes.m_list[i];
+
+				lock_guard<mutex> lock(m_mtx);
+				target.min.x = std::min(target.min.x, source.min.x);
+				target.min.y = std::min(target.min.y, source.min.y);
+				target.min.z = std::min(target.min.z, source.min.z);
+
+				target.max.x = std::max(target.max.x, source.max.x);
+				target.max.y = std::max(target.max.y, source.max.y);
+				target.max.z = std::max(target.max.z, source.max.z);
+
+				// target.mask = target.mask | source.mask;
+				
+				for(int j = 0; j < target.histogram.size(); j++){
+					target.histogram[j] = target.histogram[j] + source.histogram[j];
+				}
+			}
+
+    };
   }
 
   void process_sources() {

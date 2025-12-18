@@ -289,19 +289,19 @@ void las_utils::cell_point_counter::assembly_sources() {
 		int64_t bpp = header->point_data_record_length;
 		int64_t numPoints = std::max(uint64_t(header->number_of_point_records), header->extended_number_of_point_records);
 		int64_t pointsLeft = numPoints;
-		int64_t batchSize = 1'000'000;
+		int64_t batch_size = 1'000'000;
 		int64_t numRead = 0;
 
 		while (pointsLeft > 0) {
 
 			int64_t numToRead;
-			if (pointsLeft < batchSize) {
+			if (pointsLeft < batch_size) {
 				numToRead = pointsLeft;
 				pointsLeft = 0;
 			} 
 			else {
-				numToRead = batchSize;
-				pointsLeft = pointsLeft - batchSize;
+				numToRead = batch_size;
+				pointsLeft = pointsLeft - batch_size;
 			}
 			
 			int64_t firstByte = header->offset_to_point_data + numRead * bpp;
@@ -322,7 +322,7 @@ void las_utils::cell_point_counter::assembly_sources() {
 
 			m_pool->add(task);
 
-			numRead += batchSize;
+			numRead += batch_size;
 		}
 
 		laszip_close_reader(laszip_reader);
@@ -934,4 +934,71 @@ std::vector<las_utils::attribute_handler> las_utils::create_attribute_handlers(
 	}
 	
 	return handlers;
+}
+
+int las_utils::process_position(
+	const std::string& path, int64_t batch_size, const vector3& scale, 
+	const attributes& attrs, attributes& in_attrs, attributes& out_attrs, uint8_t* data, int64_t first_point
+) {
+	laszip_POINTER laszip_reader;
+	laszip_header* header;
+	laszip_point* point;
+
+	laszip_BOOL request_reader = 1;
+	laszip_BOOL is_compressed = string_utils::iends_with(path, ".laz") ? 1 : 0;
+
+	laszip_create(&laszip_reader);
+	laszip_request_compatibility_mode(laszip_reader, request_reader);
+	laszip_open_reader(laszip_reader, path.c_str(), &is_compressed);
+	laszip_get_header_pointer(laszip_reader, &header);
+	laszip_get_point_pointer(laszip_reader, &point);
+
+	laszip_seek_point(laszip_reader, first_point);
+	
+	auto attributeHandlers = create_attribute_handlers(header, data, point, in_attrs, out_attrs);
+
+	double coordinates[3];
+	auto aPosition = out_attrs.get("position");
+
+	for (int64_t i = 0; i < batch_size; i++) {
+		laszip_read_point(laszip_reader);
+		laszip_get_coordinates(laszip_reader, coordinates);
+
+		int64_t offset = i * attrs.bytes;
+
+		{ // copy position
+			double x = coordinates[0];
+			double y = coordinates[1];
+			double z = coordinates[2];
+
+			int32_t X = int32_t((x - attrs.m_pos_offset.x) / scale.x);
+			int32_t Y = int32_t((y - attrs.m_pos_offset.y) / scale.y);
+			int32_t Z = int32_t((z - attrs.m_pos_offset.z) / scale.z);
+
+			memcpy(data + offset + 0, &X, 4);
+			memcpy(data + offset + 4, &Y, 4);
+			memcpy(data + offset + 8, &Z, 4);
+
+			aPosition->min.x = std::min(aPosition->min.x, x);
+			aPosition->min.y = std::min(aPosition->min.y, y);
+			aPosition->min.z = std::min(aPosition->min.z, z);
+
+			aPosition->max.x = std::max(aPosition->max.x, x);
+			aPosition->max.y = std::max(aPosition->max.y, y);
+			aPosition->max.z = std::max(aPosition->max.z, z);
+		}
+
+		// copy other attributes
+		for (auto& handler : attributeHandlers) {
+			handler(offset);
+		}
+
+	}
+
+	int pointFormat = header->point_data_format;
+
+	laszip_close_reader(laszip_reader);
+	laszip_destroy(laszip_reader);
+
+	return pointFormat;
 }

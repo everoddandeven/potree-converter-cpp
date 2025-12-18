@@ -37,6 +37,7 @@ namespace potree {
 
     bool is_rgb() const { return name == "rgb"; }
     bool is_position() const { return name == "position"; }
+    bool is_classification() const { return name == "classification"; }
     std::string get_morton_name() const {
       if (is_position()) return "position_morton";
       else if (is_rgb()) return "rgb_morton";
