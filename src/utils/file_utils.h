@@ -15,6 +15,6 @@ namespace file_utils {
   json read_json(const std::string& path);
   std::string read_text(const std::string& path);
   void write_text(const std::string& path, const std::string& text);
-
+  size_t size(const std::string& file_path);
 }
 }

@@ -40,7 +40,7 @@ bool sampler_poisson::accept(
   return true;
 }
 
-void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std::function<void(node*)> on_complete, std::function<void(node*)> on_discard) {
+void sampler_poisson::sample(const std::shared_ptr<potree::node>& n, attributes& attrs, double base_spacing, node_function on_complete, node_function on_discard) {
   int bytesPerPoint = attrs.bytes;
   vector3& scale = attrs.m_pos_scale;
   vector3& offset = attrs.m_pos_offset;
@@ -151,14 +151,14 @@ void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std
       }
 
       if (numRejected == 0 && child->isLeaf()) {
-        on_discard(child.get());
+        on_discard(child);
         node->children[childIndex] = nullptr;
       } 
       if (numRejected > 0) {
         child->points = rejected;
         child->numPoints = numRejected;
 
-        on_complete(child.get());
+        on_complete(child);
       } 
       else if (numRejected == 0) {
         // the parent has taken all points from this child, 
@@ -169,7 +169,7 @@ void sampler_poisson::sample(node* n, attributes attrs, double base_spacing, std
         // https://github.com/potree/potree/issues/1125
         child->points = nullptr;
         child->numPoints = 0;
-        on_complete(child.get());
+        on_complete(child);
       }
     }
 

@@ -4,6 +4,6 @@
 
 namespace potree {
   struct sampler_random : public sampler {
-    void sample(node* n, attributes attrs, double base_spacing, std::function<void(node*)> on_complete, std::function<void(node*)> on_discard) override;
+    void sample(const std::shared_ptr<potree::node>& n, attributes& attrs, double base_spacing, node_function on_complete, node_function on_discard) override;
   };
 }

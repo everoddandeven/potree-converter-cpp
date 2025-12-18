@@ -5,6 +5,7 @@
 #include <deque>
 #include <fstream>
 #include "common/options.h"
+#include "sampler/sampler.h"
 #include "node.h"
 #include "chunk.h"
 
@@ -21,10 +22,12 @@ namespace potree {
 
   struct hierarchy_builder {
   public:
+    std::shared_ptr<node_batch> m_root_batch;
+
     hierarchy_builder(const std::string& path, int step_size);
     void build();
+
   private:
-    std::shared_ptr<node_batch> m_root_batch;
     std::string m_path;
     int m_step_size = 0;
   
@@ -39,7 +42,7 @@ namespace potree {
 
     void clear();
     void flush(int step_size);
-    void write(node* n, int step_size);
+    void write(const std::shared_ptr<potree::node>& n, int step_size);
     void write(std::vector<node>& nodes, int step_size);
 
   private:
@@ -86,7 +89,7 @@ namespace potree {
     attributes m_attributes;
     options m_options;
 
-    hierarchy_indexer(const std::string& target_dir);
+    hierarchy_indexer(const std::string& target_dir, const potree::options& opts);
     ~hierarchy_indexer();
 
     std::string get_target_dir() const { return m_target_dir; }
@@ -100,7 +103,7 @@ namespace potree {
     void reload();
     std::vector<chunk_node> process_chunk_roots();
     void build_hierarchy(const std::shared_ptr<potree::node>& node, const std::shared_ptr<potree::buffer>& points, int64_t num_points, int64_t depth = 0);
-
+    void do_indexing(const std::shared_ptr<potree::status>& state, const std::shared_ptr<potree::sampler>& sampler);
   private:
     std::mutex m_mtx;
     std::mutex m_root_mtx;
@@ -118,7 +121,10 @@ namespace potree {
     std::vector<std::shared_ptr<node>> m_detached_parts;
     std::vector<node_flush_info> m_flushed_chunk_roots;
     std::fstream m_fs_chunk_roots;
+    std::shared_ptr<potree::chunks> m_chunks;
 
+    void on_completed(const std::shared_ptr<potree::node>& node);
+    void on_discarded(const std::shared_ptr<potree::node>& node);
   };
 
 }

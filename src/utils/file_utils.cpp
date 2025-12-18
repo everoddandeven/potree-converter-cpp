@@ -86,3 +86,6 @@ void file_utils::write_text(const std::string& path, const std::string& text) {
   out.close();
 }
 
+size_t file_utils::size(const std::string& file_path) {
+  return std::filesystem::file_size(file_path);
+}

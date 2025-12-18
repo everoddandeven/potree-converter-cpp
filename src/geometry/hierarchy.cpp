@@ -8,6 +8,7 @@
 #include "utils/file_utils.h"
 #include "utils/brotli_utils.h"
 #include "utils/json_utils.h"
+#include "utils/chunk_utils.h"
 #include "hierarchy.h"
 
 using namespace potree;
@@ -92,6 +93,14 @@ struct load_task : public task {
     this->node = node;
     this->offset = offset;
     this->size = size;
+  }
+};
+
+struct chunk_task : public task {
+  std::shared_ptr<potree::chunk> m_chunk;
+
+  chunk_task(const std::shared_ptr<potree::chunk>& chunk) {
+    m_chunk = chunk;
   }
 };
 
@@ -504,7 +513,7 @@ void hierarchy_flusher::flush(int step_size) {
   m_buffer.clear();
 }
 
-void hierarchy_flusher::write(node* n, int step_size) {
+void hierarchy_flusher::write(const std::shared_ptr<potree::node>& n, int step_size) {
   if (n == nullptr) throw std::runtime_error("Cannot write null flushed node");
   std::lock_guard<std::mutex> lock(m_mtx);
   m_buffer.push_back(*n);
@@ -583,8 +592,13 @@ void hierarchy_flusher::write(std::vector<potree::node>& nodes, int step_size) {
   }
 }
 
-hierarchy_indexer::hierarchy_indexer(const std::string& target_dir) {
+hierarchy_indexer::hierarchy_indexer(const std::string& target_dir, const potree::options& opts) {
   m_target_dir = target_dir;
+  m_options = opts;
+  m_chunks = chunk_utils::load_chunks(target_dir);
+  m_attributes = m_chunks->m_attributes;
+  m_root = std::make_shared<potree::node>("r", m_chunks->min, m_chunks->max);
+  m_spacing = (m_chunks->max - m_chunks->min).x / 128.0;
   m_writer = std::make_unique<hierarchy_writer>(shared_from_this());
   m_flusher = std::make_unique<hierarchy_flusher>(target_dir + "/.hierarchyChunks");
   std::string cr_file = target_dir + "/tmpChunkRoots.bin";
@@ -1077,3 +1091,170 @@ void hierarchy_indexer::build_hierarchy(const std::shared_ptr<potree::node>& nod
   }
 }
 
+void hierarchy_indexer::on_completed(const std::shared_ptr<potree::node>& node) {
+  m_writer->write_and_unload(node);
+  m_flusher->write(node, hierarchy::DEFAULT_STEP_SIZE);
+}
+
+void hierarchy_indexer::on_discarded(const std::shared_ptr<potree::node>& node) {
+  // nothing to do
+}
+
+void hierarchy_indexer::do_indexing(const std::shared_ptr<potree::status>& state, const std::shared_ptr<potree::sampler>& sampler) {
+  gen_utils::profiler pr("hierarchy_indexer::do_indexing()");
+
+  state->name = "INDEXING";
+  state->currentPass = 3;
+  state->pointsProcessed = 0;
+  state->bytesProcessed = 0;
+  state->duration = 0;
+
+  double last_report = gen_utils::now();
+  double t_start = gen_utils::now();
+  int64_t total_points = 0;
+  int64_t total_bytes = 0;
+  int64_t processed_points = 0;
+  std::atomic_int64_t active_threads = 0;
+  int num_threads = gen_utils::get_num_processors() + 4;
+  std::vector<std::shared_ptr<potree::node>> nodes;
+  std::mutex nodes_mtx;
+
+  for(const auto& chunk : m_chunks->m_list) {
+    auto file_size = file_utils::size(chunk->m_file);
+    total_points += file_size / m_attributes.bytes;
+    total_bytes += file_size;
+  }
+
+  // create task pool
+  const auto on_complete = [this](auto const & n){
+    on_completed(n);
+  };
+  const auto on_discard = [this](auto const& n){
+    on_discarded(n);
+  };
+  task_pool pool(num_threads, [this, t_start, &state, &nodes, &nodes_mtx, &active_threads, &sampler, &processed_points, &total_points, &last_report, &on_complete, &on_discard](std::shared_ptr<potree::task> t) {
+    auto task = std::static_pointer_cast<chunk_task>(t);
+    auto& chunk = task->m_chunk;
+    auto chunk_root = std::make_shared<potree::node>(chunk->m_id, chunk->min, chunk->max);
+    auto& attrs = m_chunks->m_attributes;
+    int64_t bpp = attrs.bytes;
+
+    wait_for_backlog_below(1'000);
+    active_threads++;
+    size_t file_size = file_utils::size(chunk->m_file);
+
+		MINFO << "start indexing chunk " + chunk->m_id << std::endl
+		<< "filesize: " << gen_utils::format_number(file_size) << std::endl
+		<< "min: " << chunk->min.to_string() << std::endl
+		<< "max: " << chunk->max.to_string() << std::endl;
+
+    m_bytes_in_memory += file_size;
+    auto pt_buffer = file_utils::read_binary(chunk->m_file);
+
+    if (!m_options.m_keep_chunks) {
+      std::filesystem::remove(chunk->m_file);
+    }
+
+    int64_t num_points = pt_buffer->size / bpp;
+    build_hierarchy(chunk_root, pt_buffer, num_points);
+
+    sampler->sample(chunk_root, attrs, m_spacing, on_complete, on_discard);
+
+		// detach anything below the chunk root. Will be reloaded from
+		// temporarily flushed hierarchy during creation of the hierarchy file
+		chunk_root->children.clear();
+    flush(chunk_root);
+
+    if (chunk_root->name.size() > 1) {
+      // add chunk root, provided it isn't the root.
+      m_root->addDescendant(chunk_root);
+    }
+
+    std::lock_guard<std::mutex> lock(nodes_mtx);
+
+    processed_points += num_points;
+    double progress = double(processed_points) / double(total_points);
+
+    if (gen_utils::now() - last_report > 1.0) {
+      state->pointsProcessed = processed_points;
+      state->duration = gen_utils::now() - t_start;
+      last_report = gen_utils::now();
+    }
+
+    nodes.push_back(chunk_root);
+    MINFO << "Finished indexing chunk " << chunk->m_id << std::endl;
+
+    active_threads--;
+  });
+
+  for(const auto& chunk : m_chunks->m_list) {
+    auto task = std::make_shared<chunk_task>(chunk);
+    pool.add(task);
+  }
+
+  pool.wait();
+  pool.close();
+
+  m_fs_chunk_roots.close();
+
+  // process chunk roots in batches
+	{ 
+		std::string tmpChunkRootsPath = m_target_dir + "/tmpChunkRoots.bin";
+		auto tasks = process_chunk_roots();
+
+		for (auto& task : tasks) {
+			
+      for (auto& fcr : task.m_flushed_roots) {
+				auto buffer = std::make_shared<potree::buffer>(fcr.size);
+				file_utils::read_binary(tmpChunkRootsPath, fcr.offset, fcr.size, buffer->data);
+				fcr.m_node->points = buffer;
+			}
+
+			sampler->sample(task.m_node, m_attributes, m_spacing, on_complete, on_discard);
+			task.m_node->children.clear();
+		}
+	}
+
+	// sample up to root node
+	if (m_chunks->m_list.size() == 1) {
+		auto& node = nodes[0];
+		m_root = node;
+	} 
+  else if (!m_root->sampled){
+		sampler->sample(m_root, m_attributes, m_spacing, on_complete, on_discard);
+	}
+
+  // root is automatically finished after subsampling all descendants
+  on_complete(m_root);
+  m_writer->close_and_wait();
+  m_flusher->flush(hierarchy::DEFAULT_STEP_SIZE);
+  std::string h_dir = m_target_dir + "./hierarchyChunks";
+  hierarchy_builder builder(h_dir, hierarchy::DEFAULT_STEP_SIZE);
+  builder.build();
+  hierarchy h;
+  h.m_step_size = hierarchy::DEFAULT_STEP_SIZE;
+  h.m_first_chunk_size = builder.m_root_batch->byteSize;
+
+  std::string metadata_path = m_target_dir + "/metadata.json";
+  std::string metadata = build_metadata(m_options, state, h);
+  file_utils::write_text(metadata_path, metadata);
+  {
+		MINFO << "Deleting temporary files" << std::endl;
+
+		// delete chunk directory
+		if (!m_options.m_keep_chunks) {
+			std::string cmpath = m_target_dir + "/chunks/metadata.json";
+
+			std::filesystem::remove(cmpath);
+			std::filesystem::remove(m_target_dir + "/chunks");
+		}
+
+		// delete chunk roots data
+		std::string octree_path = m_target_dir + "/tmpChunkRoots.bin";
+		std::filesystem::remove(octree_path);
+	}
+
+	double duration = gen_utils::now() - t_start;
+	state->values["duration(indexing)"] = gen_utils::format_number(duration, 3);
+
+}
