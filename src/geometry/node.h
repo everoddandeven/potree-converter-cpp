@@ -64,12 +64,14 @@ namespace potree {
     void traversePost(std::function<void(const std::shared_ptr<node>&)> callback);
     node* find(std::string name);
     std::vector<int64_t_point> get_points(const attributes& attrs) const;
+    std::shared_ptr<potree::node> expand_to(const std::string& name);
 
     static bool compare_breadth(const potree::node& a, const potree::node& b);
     static bool compare_breadth(const std::shared_ptr<potree::node>& a, const std::shared_ptr<potree::node>& b);
     static void sort_by_breadth(std::vector<std::shared_ptr<potree::node>>& nodes);
     static attributes parse_attributes(const json& metadata);
     static std::shared_ptr<potree::node> load_hierarchy(const std::string& path, const json& metadata);
+    static std::vector<potree::node> from_pyramid_sum(const std::vector<std::vector<int64_t>>& pyramid, int max_points_per_chunk);
   };
 
   struct node_batch {

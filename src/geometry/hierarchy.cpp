@@ -13,6 +13,76 @@
 using namespace potree;
 using namespace std::chrono_literals;
 
+auto contains = [](auto const& map, auto const& key) {
+  return map.find(key) != map.end();
+};
+
+std::vector<std::vector<int64_t>> create_pyramid_sum(std::vector<int64_t>& grid, int grid_size) {
+  gen_utils::profiler pr ("hierarchy::create_pyramid_sum()");
+
+  int max_level = std::log2(grid_size);
+  int current_size = grid_size / 2;
+
+  std::vector<std::vector<int64_t>> pyramid(max_level + 1);
+
+  for(int level = 0; level < max_level; level++) {
+    double cells = pow(8, level);
+    pyramid[level].resize(cells, 0);
+  }
+
+  pyramid[max_level] = grid;
+
+	for (int level = max_level - 1; level >= 0; level--) {
+
+		for (int x = 0; x < current_size; x++) {
+		  for (int y = 0; y < current_size; y++) {
+		    for (int z = 0; z < current_size; z++) {
+          auto index = gen_utils::morton_encode(z, y, x);
+          auto index_p1 = gen_utils::morton_encode(2 * z, 2 * y, 2 * x);
+
+          int64_t sum = 0;
+          for (int i = 0; i < 8; i++) {
+            sum += pyramid[level + 1][index_p1 + i];
+          }
+
+          pyramid[level][index] = sum;
+		    }
+		  }
+		}
+
+		current_size = current_size / 2;
+	}
+
+  return pyramid;
+}
+
+int64_t calculate_grid_index(int64_t pointIndex, const std::shared_ptr<potree::buffer>& points, int64_t counterGridSize, const std::shared_ptr<potree::node>& node, const attributes& attrs) {
+  vector3 min = node->min;
+  vector3 max = node->max;
+  vector3 size = max - min;
+  int64_t bpp = attrs.bytes;
+  vector3 scale = attrs.m_pos_scale;
+  vector3 offset = attrs.m_pos_offset;
+  int64_t pointOffset = pointIndex * bpp;
+  int32_t* xyz = reinterpret_cast<int32_t*>(points->data_u8 + pointOffset);
+
+  double x = (xyz[0] * scale.x) + offset.x;
+  double y = (xyz[1] * scale.y) + offset.y;
+  double z = (xyz[2] * scale.z) + offset.z;
+
+  int64_t ix = double(counterGridSize) * (x - min.x) / size.x;
+  int64_t iy = double(counterGridSize) * (y - min.y) / size.y;
+  int64_t iz = double(counterGridSize) * (z - min.z) / size.z;
+
+  ix = std::max(int64_t(0), std::min(ix, counterGridSize - 1));
+  iy = std::max(int64_t(0), std::min(iy, counterGridSize - 1));
+  iz = std::max(int64_t(0), std::min(iz, counterGridSize - 1));
+
+  int64_t index = gen_utils::morton_encode(iz, iy, ix);
+
+  return index;
+}
+
 struct load_task : public task {
   std::shared_ptr<potree::node> node;
   int64_t offset;
@@ -824,3 +894,186 @@ std::string hierarchy_indexer::build_metadata(const options& opts, const std::sh
 
 	return ss.str();
 }
+
+void hierarchy_indexer::build_hierarchy(const std::shared_ptr<potree::node>& node, const std::shared_ptr<potree::buffer>& points, int64_t num_points, int64_t depth) {
+  gen_utils::profiler pr("hierarchy_indexer::build_hierarchy()");
+
+  if (num_points < MAX_POINTS_PER_CHUNK) {
+    node->indexStart = 0;
+    node->numPoints = num_points;
+    node->points = points;
+    return;
+  }
+
+  int64_t bpp = m_attributes.bytes;
+  int64_t levels = 5;
+  int64_t counter_grid_size = pow(2, levels);
+  std::vector<int64_t> counters(counter_grid_size * counter_grid_size * counter_grid_size, 0);
+
+  // COUNTING
+  for (int64_t i = 0; i < num_points; i++) {
+    auto idx = calculate_grid_index(i, points, counter_grid_size, node, m_attributes);
+    counters[idx]++;
+  }
+
+  // DISTRIBUTING
+  {
+		std::vector<int64_t> offsets(counters.size(), 0);
+		for (int64_t i = 1; i < counters.size(); i++) {
+			offsets[i] = offsets[i - 1] + counters[i - 1];
+		}
+
+		if (num_points * bpp < 0) {
+			std::stringstream ss;
+
+			auto size = num_points * bpp;
+			ss << "invalid call to malloc(" << std::to_string(size) << ")\n";
+			ss << "in function buildHierarchy()\n";
+			ss << "node: " << node->name << "\n";
+			ss << "#points: " << node->numPoints<< "\n";
+			ss << "min: " << node->min.to_string() << "\n";
+			ss << "max: " << node->max.to_string() << "\n";
+
+			MERROR << ss.str() << std::endl;
+		}
+
+		potree::buffer tmp(num_points * bpp);
+
+		for (int64_t i = 0; i < num_points; i++) {
+			auto index = calculate_grid_index(i, points, counter_grid_size, node, m_attributes);
+			auto targetIndex = offsets[index]++;
+			memcpy(tmp.data_u8 + targetIndex * bpp, points->data_u8 + i * bpp, bpp);
+		}
+
+		memcpy(points->data, tmp.data, num_points * bpp);
+  }
+
+  auto pyramid = create_pyramid_sum(counters, counter_grid_size);
+  auto nodes = potree::node::from_pyramid_sum(pyramid, MAX_POINTS_PER_CHUNK);
+
+  std::vector<std::shared_ptr<potree::node>> to_refine;
+  int64_t octree_depth = 0;
+
+  for (auto& candidate : nodes) {
+    auto realization = node->expand_to(candidate.name);
+    realization->indexStart = candidate.indexStart;
+    realization->numPoints = candidate.numPoints;
+    int64_t bytes = candidate.numPoints * bpp;
+
+    if (bytes < 0) throw std::runtime_error("Cannot build hierarchy: invalid call to malloc, node: " + node->name + ", num points: " + std::to_string(node->numPoints));
+
+    auto buffer = std::make_shared<potree::buffer>(bytes);
+		memcpy(buffer->data,
+			points->data_u8 + candidate.indexStart * bpp,
+			candidate.numPoints * bpp
+		);
+    realization->points = buffer;
+
+    if (realization->numPoints > MAX_POINTS_PER_CHUNK) {
+      to_refine.push_back(realization);
+    }
+
+    octree_depth = std::max(octree_depth, realization->get_level());
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(m_depth_mtx);
+		m_octree_depth = std::max(m_octree_depth, octree_depth);
+  }
+
+  int64_t sanity_check = 0;
+
+  for (int64_t node_idx = 0; node_idx < to_refine.size(); node_idx++) {
+    auto subject = to_refine[node_idx];
+    auto buffer = subject->points;
+
+    if (sanity_check > to_refine.size() * 2) {
+      MERROR << "hierarchy_indexer::build_hierarchy(): Failed to partition point cloud" << std::endl;
+    }
+
+    if (subject->numPoints == num_points) {
+      // the subsplit has the same number of points than the input -> ERROR
+      std::unordered_map<std::string, int> counters;
+
+			for (int64_t i = 0; i < num_points; i++) {
+				int64_t src_offset = i * bpp;
+				int32_t X, Y, Z;
+				memcpy(&X, buffer->data_u8 + src_offset + 0, 4);
+				memcpy(&Y, buffer->data_u8 + src_offset + 4, 4);
+				memcpy(&Z, buffer->data_u8 + src_offset + 8, 4);
+
+				std::stringstream ss;
+				ss << X << ", " << Y << ", " << Z;
+				std::string key = ss.str();
+				counters[key]++;
+			}
+
+			int64_t num_points_in_box = subject->numPoints;
+			int64_t num_unique_points = counters.size();
+			int64_t num_duplicates = num_points_in_box - num_unique_points;
+
+      if (num_duplicates < MAX_POINTS_PER_CHUNK / 2) {
+        // few uniques, just unfavouribly distributed points
+				MWARNING << "Encountered unfavourable point distribution. Conversion continues anyway because not many duplicates were encountered. " 
+				<< "However, issues may arise. If you find an error, please report it at github." << std::endl
+				<< "#points in box: " << num_points_in_box << ", #unique points in box: " << num_unique_points << ", " << std::endl
+				<< "min: " << subject->min.to_string() << ", max: " << subject->max.to_string() << std::endl;
+        continue;
+      }
+
+      // remove the duplicates, then try again
+
+      std::vector<int64_t> distinct;
+      std::unordered_map<std::string, int> handled;
+
+      for (int64_t i = 0; i < num_points; i++) {
+
+        int64_t sourceOffset = i * bpp;
+
+        int32_t X, Y, Z;
+        memcpy(&X, buffer->data_u8 + sourceOffset + 0, 4);
+        memcpy(&Y, buffer->data_u8 + sourceOffset + 4, 4);
+        memcpy(&Z, buffer->data_u8 + sourceOffset + 8, 4);
+
+        std::stringstream ss;
+        ss << X << ", " << Y << ", " << Z;
+
+        std::string key = ss.str();
+        
+        if (contains(counters, key)) {
+          if (!contains(handled, key)) {
+            distinct.push_back(i);
+            handled[key] = true;
+          }
+        } 
+        else {
+          distinct.push_back(i);
+        }
+
+      }
+
+      MWARNING << "Too many duplicate points were encountered. #points: " << subject->numPoints << std::endl
+      << ", #unique points: " << distinct.size() << std::endl
+      << "Duplicates inside node will be dropped! " << std::endl
+      << "min: " << subject->min.to_string() << ", max: " << subject->max.to_string() << std::endl;
+
+      auto distinct_buffer = std::make_shared<potree::buffer>(distinct.size() * bpp);
+
+      for (int64_t i = 0; i < distinct.size(); i++) {
+        distinct_buffer->write(buffer->data_u8 + i * bpp, bpp);
+      }
+
+      subject->points = distinct_buffer;
+      subject->numPoints = distinct.size();
+
+      node_idx--; // try again
+    }
+
+    int64_t next_num_points = subject->numPoints;
+    subject->points = nullptr;
+    subject->numPoints = 0;
+
+    build_hierarchy(subject, buffer, next_num_points, depth + 1);
+  }
+}
+

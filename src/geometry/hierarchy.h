@@ -77,6 +77,8 @@ namespace potree {
 
   struct hierarchy_indexer : public std::enable_shared_from_this<hierarchy_indexer> {
   public:
+    static const int MAX_POINTS_PER_CHUNK = 10'000;
+
     std::atomic_int64_t m_byte_offset = 0;
     std::atomic_int64_t m_bytes_in_memory = 0;
 		std::atomic_int64_t m_bytes_to_write = 0;
@@ -87,6 +89,7 @@ namespace potree {
     hierarchy_indexer(const std::string& target_dir);
     ~hierarchy_indexer();
 
+    std::string get_target_dir() const { return m_target_dir; }
     void wait_for_backlog_below(int max_mb);
     void wait_for_memory_below(int max_mb);
     std::string build_metadata(const options& opts, const std::shared_ptr<status>& state, const hierarchy& hry);
@@ -96,8 +99,7 @@ namespace potree {
     void flush(const std::shared_ptr<potree::node>& chunk_root);
     void reload();
     std::vector<chunk_node> process_chunk_roots();
-
-    std::string get_target_dir() const { return m_target_dir; }
+    void build_hierarchy(const std::shared_ptr<potree::node>& node, const std::shared_ptr<potree::buffer>& points, int64_t num_points, int64_t depth = 0);
 
   private:
     std::mutex m_mtx;

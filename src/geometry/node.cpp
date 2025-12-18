@@ -245,3 +245,103 @@ void node::sort_by_distance_to_center(std::vector<point>& points) const {
 chunk_node::chunk_node() {
   children.resize(8, nullptr);
 }
+
+std::shared_ptr<potree::node> node::expand_to(const std::string& child_name) {
+  std::string start_name = name;
+  std::string full_name = start_name + child_name;
+  // e.g. startName: r, fullName: r031
+  // start iteration with char at index 1: "0"
+
+  std::shared_ptr<potree::node> current = shared_from_this();
+
+  for (int64_t i = start_name.size(); i < full_name.size(); i++) {
+    int64_t index = full_name.at(i) - '0';
+
+    if (current->children[index] == nullptr) {
+      auto bbox = bounding_box::child_of(current->min, current->max, index);
+      std::string c_name = current->name + std::to_string(index);
+
+      auto child = std::make_shared<potree::node>();
+      child->min = bbox.min;
+      child->max = bbox.max;
+      child->name = c_name;
+      child->children.resize(8);
+
+      current->children[index] = child;
+      current = child;
+    } 
+    else {
+      current = current->children[index];
+    }
+  }
+
+  return current;
+}
+
+
+std::vector<potree::node> node::from_pyramid_sum(const std::vector<std::vector<int64_t>>& pyramid, int max_points_per_chunk) {
+  std::vector<potree::node> nodes;
+  std::vector<std::vector<int64_t>> pyramid_offsets;
+
+  for(const auto& counters : pyramid) {
+    if (counters.size() == 1) {
+      pyramid_offsets.push_back({ 0 });
+      continue;
+    }
+
+    std::vector<int64_t> offsets(counters.size(), 0);
+    for(int64_t i = 1; i < counters.size(); i++) {
+      int64_t offset = offsets[i - 1] + counters[i - 1];
+      offsets[i] = offset;
+    }
+
+    pyramid_offsets.push_back(offsets);
+  }
+
+  // pyramid starts at level 0 -> grid_size = 1
+	// 2 levels -> levels 0 and 1 -> max_level 1
+
+  auto max_level = pyramid.size() - 1;
+
+  potree::node root;
+  std::vector<potree::node> stack = { root };
+
+  while(!stack.empty()) {
+    auto& candidate = stack.back();
+    stack.pop_back();
+    auto& grid = pyramid[candidate.level];
+    auto idx = gen_utils::morton_encode(candidate.z, candidate.y, candidate.x);
+    int64_t num_points = grid[idx];
+
+    if (candidate.level == max_level) {
+      // don't split further at this time. May be split further in another pass
+      if (num_points > 0) nodes.push_back(candidate);
+    }
+    else if (num_points > max_points_per_chunk) {
+      // split (too many points in node)
+      for (int i = 0; i < 8; i++) {
+        auto idx_p1 = gen_utils::morton_encode(2 * candidate.z, 2 * candidate.y, 2 * candidate.x) + i;
+        int64_t count = pyramid[candidate.level + 1][idx_p1];
+
+        if (count > 0) {
+          potree::node child;
+          child.level = candidate.level + 1;
+					child.name = candidate.name + std::to_string(i);
+					child.indexStart = pyramid_offsets[candidate.level + 1][idx_p1];
+					child.numPoints = count;
+					child.x = 2 * candidate.x + ((i & 0b100) >> 2);
+					child.y = 2 * candidate.y + ((i & 0b010) >> 1);
+					child.z = 2 * candidate.z + ((i & 0b001) >> 0);
+          stack.push_back(child);
+        }
+      }
+    }
+    else if (num_points > 0) {
+      // accept small enough
+      nodes.push_back(candidate);
+    }
+  }
+
+  return nodes;
+}
+
