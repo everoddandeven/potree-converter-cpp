@@ -68,5 +68,8 @@ namespace las_utils {
     const std::string& path, int64_t batch_size, const vector3& scale, 
     const attributes& attrs, attributes& in_attrs, attributes& out_attrs, uint8_t* data, int64_t first_point
   );
+
+  file_source_container curate_sources(std::vector<std::string>& paths);
+
 }
 }

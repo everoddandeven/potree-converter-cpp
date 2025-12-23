@@ -65,6 +65,7 @@ set(HEADER_FILES
   ./src/utils/concurrent_writer.h
   ./src/utils/string_utils.h
   ./src/utils/las_utils.h
+  ./src/converter/converter.h
 )
 
 set(SRC_FILES
@@ -89,6 +90,7 @@ set(SRC_FILES
   ./src/utils/file_utils.cpp
   ./src/utils/gen_utils.cpp
   ./src/utils/las_utils.cpp
+  ./src/converter/converter.cpp
 )
 
 add_library(potree-converter-cpp SHARED ${SRC_FILES})

@@ -9,6 +9,7 @@
 
 using namespace potree;
 using std::chrono::high_resolution_clock;
+using namespace std::chrono_literals;
 
 static const long long start_time = high_resolution_clock::now().time_since_epoch().count();
 
@@ -212,3 +213,19 @@ void gen_utils::monitor::stop() {
 size_t gen_utils::get_num_processors() {
 	return get_cpu_data().numProcessors;
 }
+
+gen_utils::memory_checker::memory_checker(int64_t max_mb, double interval) {
+	m_max_mb = max_mb;
+	m_interval = interval;
+
+	m_thread = std::thread([this]() {
+		while(true) {
+			auto mem_data = get_memory_data();
+			// TODO print memory data?
+			std::this_thread::sleep_for(std::chrono::milliseconds(int64_t(m_interval * 1000)));
+		}
+	});
+	m_thread.detach();
+}
+
+

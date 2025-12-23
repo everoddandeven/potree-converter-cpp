@@ -20,5 +20,7 @@ namespace potree {
     bool m_keep_chunks = false;
     bool m_no_chunking = false;
     bool m_no_indexing = false;
+
+    bool skip_chunking() const { return m_no_chunking || m_chunk_method == "SKIP"; }
   };
 }

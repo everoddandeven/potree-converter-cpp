@@ -1002,3 +1002,58 @@ int las_utils::process_position(
 
 	return pointFormat;
 }
+
+file_source_container las_utils::curate_sources(std::vector<std::string>& paths) {
+	std::string name = "";
+	std::vector<string> expanded;
+	
+	for (const auto& path : paths) {
+		if (std::filesystem::is_directory(path)) {
+			for (auto& entry : std::filesystem::directory_iterator(path)) {
+				std::string str = entry.path().string();
+
+				if (string_utils::iends_with(str, "las") || string_utils::iends_with(str, "laz")) {
+					expanded.push_back(str);
+				}
+			}
+		} else if (std::filesystem::is_regular_file(path)) {
+			if (string_utils::iends_with(path, "las") || string_utils::iends_with(path, "laz")) {
+				expanded.push_back(path);
+			}
+		}
+
+		if (name.size() == 0) {
+			name = std::filesystem::path(path).stem().string();
+		}
+	}
+	
+	paths = expanded;
+
+	MINFO << "#paths: " << paths.size() << std::endl;
+
+	std::vector<file_source> sources;
+	sources.reserve(paths.size());
+
+	std::mutex mtx;
+	auto parallel = std::execution::par;
+	for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](const std::string& path) {
+		auto header = las_header::load(path);
+		auto filesize = std::filesystem::file_size(path);
+
+		vector3 min = { header.min.x, header.min.y, header.min.z };
+		vector3 max = { header.max.x, header.max.y, header.max.z };
+
+		file_source source;
+		source.path = path;
+		source.min = min;
+		source.max = max;
+		source.numPoints = header.numPoints;
+		source.filesize = filesize;
+
+		std::lock_guard<std::mutex> lock(mtx);
+		sources.push_back(source);
+	});
+
+	return {name, sources};
+}
+

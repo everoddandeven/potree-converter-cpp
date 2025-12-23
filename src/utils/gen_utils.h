@@ -41,6 +41,16 @@ namespace gen_utils {
     void print();
   };
 
+  struct memory_checker {
+  public:
+    memory_checker(int64_t max_mb, double m_interval);
+
+  private:
+    int64_t m_max_mb;
+    double m_interval;
+    std::thread m_thread;
+  };
+
   double now();
 
   class punct_facet : public std::numpunct<char> {

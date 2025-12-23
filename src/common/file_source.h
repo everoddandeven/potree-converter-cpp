@@ -11,4 +11,9 @@ namespace potree {
     vector3 min;
     vector3 max;
   };
+
+  struct file_source_container {
+    std::string m_name;
+    std::vector<file_source> m_files;
+  };
 }
